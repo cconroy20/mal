@@ -315,44 +315,36 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
                 ax.hlines(eo, xc - half, xc + half, color="C3", lw=1.2,
                           ls="--", alpha=0.9)
 
-    # ionization limit
+    # ionization limit, labelled with the actual energy in eV
     if ie_cm is not None:
         ax.axhline(ie_cm, color="0.3", lw=1.0, ls="--")
-        ax.text(nx - 0.3, ie_cm, " ionization limit", va="bottom", ha="right",
-                fontsize=8, color="0.3")
+        ax.text(nx - 0.3, ie_cm, f" ionization limit ({ie_cm / EV:.2f} eV)",
+                va="bottom", ha="right", fontsize=8, color="0.3")
 
     # x-axis: term symbols
     ax.set_xticks([x for _, _, x in cols])
     ax.set_xticklabels([_term_mathlabel(tk, par) for tk, par, _ in cols],
                        fontsize=11)
-    # parity block headers
-    for par, lab in (("e", "even parity"), ("o", "odd parity")):
-        xs = [x for tk, pp, x in cols if pp == par]
-        if xs:
-            ax.text(np.mean(xs), 1.01, lab,
-                    transform=ax.get_xaxis_transform(), ha="center",
-                    va="bottom", fontsize=9, style="italic")
 
     ax.set_xlim(-0.8, nx - 0.2)
     if ylim is not None:
         ax.set_ylim(ylim)
     ax.set_ylabel("Energy (cm$^{-1}$)")
 
-    # right axis in eV, sharing the same data range
+    # right axis in eV, sharing the same data range, with a visible solid spine
     axr = ax.twinx()
     axr.set_ylim(ax.get_ylim()[0] / EV, ax.get_ylim()[1] / EV)
     axr.set_ylabel("Energy (eV)")
+    axr.spines["right"].set_visible(True)
+    axr.spines["right"].set_color("black")
+    axr.spines["right"].set_linewidth(0.8)
 
     from matplotlib.lines import Line2D
     handles = [Line2D([0], [0], color="C0", lw=1.6, label=solid_label),
                Line2D([0], [0], color="C3", lw=1.2, ls="--",
                       label="observed (NIST)")]
-    ax.legend(handles=handles, frameon=False, fontsize=9, loc="upper left")
-    fig.text(0.5, 0.01,
-             "One column per term; levels labelled by running orbital (red). "
-             f"Solid = {solid_label}, dashed = observed (NIST).",
-             ha="center", fontsize=8, style="italic")
-    fig.tight_layout(rect=[0.04, 0.04, 1, 0.94])
+    ax.legend(handles=handles, frameon=False, fontsize=9, loc="lower right")
+    fig.tight_layout(rect=[0.04, 0.02, 1, 0.94])
     pdf.savefig(fig); plt.close(fig)
 
 
