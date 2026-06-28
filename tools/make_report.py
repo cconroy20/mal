@@ -550,7 +550,44 @@ def _page_level_table_simple(pdf, species, panels):
     _table_pages(pdf, f"{species}: levels (computed vs observed)", col, rows)
 
 
-def page_residuals(pdf, species, matched, unified_panels=None):
+def load_kurucz_levels(paths):
+    """Parse Bob Kurucz's RCE fit log(s) (c<xxyy>{e,o}z.log / c<xxyy>{e,o}.log)
+    for his fitted level energies. Each 'OBSERVED ENERGY / EIGENVALUE / E-O'
+    table row gives (E_obs, E_fit, residual). Predicted levels (blank observed
+    energy) are skipped. Returns list of (E_obs, residual) for levels that have
+    an observed energy. `paths` is one path or a list (even+odd)."""
+    if isinstance(paths, str):
+        paths = [paths]
+    out = []
+    for path in paths:
+        if not path or not os.path.exists(path):
+            continue
+        with open(path, errors="replace") as f:
+            in_tab = False
+            for ln in f:
+                if "EIGENVALUE" in ln and "E-O" in ln:
+                    in_tab = True
+                    continue
+                if not in_tab:
+                    continue
+                s = ln.rstrip("\n")
+                # data row: idx  E_obs  EIGENVALUE  E-O  ...  (E_obs may be blank)
+                m = re.match(r"\s*\d+\s+(-?\d+\.\d*)\s+(-?\d+\.\d+)\s+"
+                             r"(-?\d+\.\d+)\b", s)
+                if m:
+                    e_obs = float(m.group(1))
+                    resid = float(m.group(3))   # E-O = E_fit - E_obs
+                    out.append((e_obs, resid))
+                elif s.strip() and not s.lstrip()[0].isdigit() \
+                        and "EIGENVALUE" not in s and not s.startswith("J "):
+                    # a non-data, non-blank line (e.g. a new header) ends the run
+                    if "OBSERVED" in s or "$" in s:
+                        in_tab = False
+    return out
+
+
+def page_residuals(pdf, species, matched, unified_panels=None,
+                   kurucz_levels=None):
     """Residuals vs observed. With a fit (unified_panels), overlay ab initio
     (circles) and fitted (diamonds) drawn from the SAME level set. Without a fit,
     fall back to the ab-initio-only `matched` list."""
@@ -584,6 +621,11 @@ def page_residuals(pdf, species, matched, unified_panels=None):
             title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(a[:,1]**2)):.0f}")
         else:
             ax.text(0.5, 0.5, "no matched levels", ha="center")
+    if kurucz_levels:
+        k = np.array(kurucz_levels)
+        ax.scatter(k[:, 0], k[:, 1], s=26, facecolors="none", edgecolors="C2",
+                   marker="s", zorder=2, label="Kurucz (gfall fit)")
+        title_bits.append(f"Kurucz RMS = {np.sqrt(np.mean(k[:,1]**2)):.0f}")
     ax.set_title(f"{species}: level residuals   "
                  + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
                     if title_bits else ""), fontsize=11)
@@ -805,6 +847,9 @@ def main():
                          "his fitted gf, added to the gf page as a 3rd series.")
     ap.add_argument("--kurucz-elem", type=float, default=None,
                     help="element code to filter Kurucz lines (e.g. 12.00 Mg I).")
+    ap.add_argument("--kurucz-levels", nargs="*", default=None,
+                    help="Bob Kurucz's RCE fit log(s) c<xxyy>{e,o}z.log; his "
+                         "fitted level residuals, added to the residuals page.")
     ap.add_argument("--fit-rms", type=float, default=None)
     a = ap.parse_args()
 
@@ -827,12 +872,15 @@ def main():
     kurucz_lines = (load_kurucz_lines(a.kurucz_lines, a.kurucz_elem)
                     if a.kurucz_lines and os.path.exists(a.kurucz_lines)
                     else None)
+    kurucz_levels = (load_kurucz_levels(a.kurucz_levels)
+                     if a.kurucz_levels else None)
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
         page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist)
-        page_residuals(pdf, a.species, matched, unified)
+        page_residuals(pdf, a.species, matched, unified,
+                       kurucz_levels=kurucz_levels)
         if nist_lines:
             page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines,
                     gf_fitted_label=a.gf_fitted_label, kurucz_lines=kurucz_lines)

@@ -17,6 +17,12 @@ KURUCZ_ARGS=()
 if [ -f "$ROOT/kurucz_ref/1200/gf1200.pos" ]; then
   KURUCZ_ARGS=(--kurucz-lines "$ROOT/kurucz_ref/1200/gf1200.pos" --kurucz-elem 12.00)
 fi
+# Bob's fitted level residuals (his RCE logs) for the residuals page.
+KLEV=()
+for f in "$ROOT"/kurucz_ref/1200/c1200ez.log "$ROOT"/kurucz_ref/1200/c1200oz.log; do
+  [ -f "$f" ] && KLEV+=("$f")
+done
+[ ${#KLEV[@]} -gt 0 ] && KURUCZ_ARGS+=(--kurucz-levels "${KLEV[@]}")
 python3 "$ROOT/tools/make_report.py" "Mg I" \
   --outg11          "$ROOT/work/mg1/OUTG11.abinitio" \
   --nist            "$ROOT/data/nist/MgI_levels.tsv" \
