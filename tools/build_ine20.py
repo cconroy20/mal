@@ -80,22 +80,22 @@ def load_nist_levels(path):
 
 
 def load_computed_terms(outg11_path):
-    """From OUTG11, get the computed levels per (parity, Jstr) in ENERGY ORDER,
-    each tagged with (cfgk, tk) -- this gives the term identity of each OUTGINE
-    J-slot (slots are in energy order). Returns dict (parity,J)->[(cfgk,tk),...]."""
+    """From OUTG11, get computed levels per (parity, Jstr) in ENERGY ORDER, each
+    tagged with its ROBUST identity (cfgk, tk) = the DOMINANT eigenvector basis
+    state (config, term). This is reliable even for strongly-mixed / reordered
+    levels, unlike the per-level config in the ENERGY-MATRIX header (which labels
+    every level by the block's first config). Returns
+    dict (parity,J) -> [{E, cfgk, tk}, ...] energy-ordered."""
     import importlib.util
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location(
         "parse_cowan", os.path.join(here, "parse_cowan.py"))
     pc = importlib.util.module_from_spec(spec); spec.loader.exec_module(pc)
-    calc, _ = pc.parse_outg11(outg11_path)
+    comp = pc.parse_compositions(outg11_path)
     out = {}
-    for c in calc:
-        out.setdefault((c["parity"], "%g" % float(c["J"])), []).append(
-            {"E": c["E_calc"] / KK, "cfgk": _cfgkey(c["config"]),
-             "tk": _termkey(c["term"])})
-    for k in out:
-        out[k].sort(key=lambda d: d["E"])
+    for key, levs in comp.items():
+        out[key] = [{"E": d["E_calc"] / KK, "cfgk": _cfgkey(d["config"]),
+                     "tk": _termkey(d["term"])} for d in levs]
     return out
 
 
@@ -216,23 +216,23 @@ def _build_focused(lines, nist_levels, computed_terms, out_path):
                 Jkey = (parity, "%g" % Jval)
                 slots = computed_terms.get(Jkey, [])     # energy-ordered
                 obs = list(nist_levels.get(Jkey, []))
-                # Match by TERM (multiplicity+L), not config (OUTG11 mislabels the
-                # per-level config). Within each term, pair computed and observed
-                # in energy order -- this handles the Rydberg series AND fixes the
-                # near-degenerate same-J term swap (e.g. 1D vs 3D).
-                obs_by_term = {}
+                # Match by exact (config, term) IDENTITY -- both the computed
+                # slot (dominant eigenvector basis state) and the NIST level carry
+                # a reliable config+term now. Within an identity, pair in energy
+                # order. Robust to mixing and energy reordering.
+                obs_by_id = {}
                 for o in sorted(obs, key=lambda d: d["E"]):
-                    obs_by_term.setdefault(o["tk"], []).append(o)
-                seen_term = {}
+                    obs_by_id.setdefault((o["cfgk"], o["tk"]), []).append(o)
+                seen_id = {}
                 newvals, newflags = [], []
                 for m in range(ncomp):
                     comp = float(FLOAT7.findall(lines[j])[m])
                     match = None
                     if m < len(slots):
-                        tk = slots[m]["tk"]
-                        rank = seen_term.get(tk, 0)      # which one of this term
-                        seen_term[tk] = rank + 1
-                        cand = obs_by_term.get(tk, [])
+                        ident = (slots[m]["cfgk"], slots[m]["tk"])
+                        rank = seen_id.get(ident, 0)
+                        seen_id[ident] = rank + 1
+                        cand = obs_by_id.get(ident, [])
                         if rank < len(cand):
                             match = cand[rank]
                     if match is not None:

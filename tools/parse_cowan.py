@@ -53,6 +53,92 @@ def parse_outg11(path):
     return _parse_levels(text), _parse_lines(text)
 
 
+def parse_compositions(path):
+    """Parse OUTG11's EIGENVALUES + EIGENVECTORS(LS) blocks and assign each
+    computed level a ROBUST identity = the dominant basis state (config, term),
+    i.e. the basis row with the largest |coefficient| in that level's column.
+
+    Returns dict (parity, Jstr) -> list (energy-ordered) of dicts
+        {E_calc (cm^-1), config, term, parity}.
+
+    The block layout (see OUTG11):
+        0  EIGENVALUES   (J= x.x)
+                          <e1> <e2> ...                (kK)
+           ...
+           EIGENVECTORS (    LS COUPLING)
+                          <colhdr configs...>
+                          <colhdr (parent)terms...>
+          R: <config> (parent)<term>  k  c1 c2 ...     (one row per basis state)
+    Column k holds the composition of eigenvalue k; the basis label of the row
+    with max |c| is that level's dominant identity.
+    """
+    with open(path, errors="replace") as f:
+        lines = f.readlines()
+    out = {}
+    i, n = 0, len(lines)
+    while i < n:
+        m = re.search(r"EIGENVALUES\s*\(J=\s*([-\d.]+)\)", lines[i])
+        if not m:
+            i += 1
+            continue
+        Jval = "%g" % float(m.group(1))
+        # eigenvalues on following non-blank numeric lines
+        evs = []
+        j = i + 1
+        while j < n and not lines[j].strip():
+            j += 1
+        while j < n:
+            s = lines[j]
+            if any(t in s for t in ("CONFIG. NO.", "EIGENVECTORS", "G-VALUES")):
+                break
+            nums = re.findall(r"-?\d+\.\d+", s)
+            if nums:
+                evs.extend(float(x) for x in nums)
+            elif s.strip() == "" and evs:
+                break
+            j += 1
+        # find the LS eigenvector block
+        while j < n and not ("EIGENVECTORS" in lines[j] and "LS" in lines[j]):
+            if re.search(r"EIGENVALUES\s*\(J=", lines[j]):
+                break
+            j += 1
+        if j >= n or "EIGENVECTORS" not in lines[j]:
+            i = j
+            continue
+        # parse basis rows: "  R: <config> (parent)<term>  k  c1 c2 ..."
+        rows = []          # (config, term, [coeffs])
+        k = j + 1
+        while k < n:
+            s = lines[k].rstrip("\n")
+            mr = re.match(
+                r"\s*\d+:\s+(\S+)\s+\(.*?\)\s*(\d[A-Z]\*?)\s+\d+\s+(.*)$", s)
+            if mr:
+                coeffs = [float(x) for x in re.findall(r"-?\d+\.\d+", mr.group(3))]
+                rows.append((mr.group(1), mr.group(2), coeffs))
+            elif "PURITY" in s or re.search(r"EIGENVECTORS|EIGENVALUES", s):
+                break
+            k += 1
+        # assign each eigenvalue its dominant basis (config, term)
+        parity = None
+        levs = []
+        for col, E in enumerate(evs):
+            best, bestc = None, -1.0
+            for (cfg, term, coeffs) in rows:
+                if col < len(coeffs) and abs(coeffs[col]) > bestc:
+                    bestc = abs(coeffs[col]); best = (cfg, term)
+            if best:
+                par = _parity_from_config(best[0])
+                levs.append({"E_calc": E * KK, "config": best[0],
+                             "term": best[1], "parity": par})
+        if levs:
+            par = levs[0]["parity"]
+            out.setdefault((par, Jval), []).extend(levs)
+        i = k
+    for key in out:
+        out[key].sort(key=lambda d: d["E_calc"])
+    return out
+
+
 def parse_levels1(path):
     """Parse RCE's LEVELS1 output -> list of dicts with the OBSERVED and FITTED
     energies together:
