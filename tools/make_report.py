@@ -199,94 +199,130 @@ def _term_sort_key(term_panel):
     return term_panel["E_mean"]
 
 
-def page_levels(pdf, species, matched):
-    """The centerpiece: energy levels grouped ONE PANEL PER TERM, ordered by
-    energy. Within a panel, each J-level is drawn as computed (solid) and NIST
-    observed (dashed) at the same x, so the vertical gap is the per-level error
-    and the fine-structure splitting is visible. Levels labelled by J.
-    (A 'fitted' series will be added when RCE output is available.)"""
-    # group matched levels by (config, termkey, parity)
+def _group_terms(matched):
+    """Group matched levels by (config, termkey, parity); return panels sorted
+    by energy (low first)."""
     groups = {}
     for m in matched:
         key = (_cfgkey(m.get("config", "")), _termkey(m["term"]),
                m.get("parity", "e"))
         groups.setdefault(key, []).append(m)
-
     panels = []
     for (cfg, tk, par), lev in groups.items():
         Es = [x["E_calc"] for x in lev] + \
              [x["E_obs"] for x in lev if x["E_obs"] is not None]
         panels.append({"cfg": cfg, "tk": tk, "par": par, "lev": lev,
                        "E_mean": np.mean(Es) if Es else 0.0})
-    panels.sort(key=_term_sort_key)          # low energy at bottom
-    panels = panels[::-1]                     # high energy at top
+    panels.sort(key=_term_sort_key)
+    return panels
 
-    # one panel per term, but keep the whole figure to ~letter size: paginate
-    # if there are many terms (cap panels per page).
-    n = len(panels)
-    fig, axes = plt.subplots(n, 1, figsize=(7.5, 9.5), squeeze=False)
-    axes = axes[:, 0]
-    fig.suptitle(f"{species}: energy levels (one panel per term)",
-                 fontsize=13, y=0.995)
 
-    palette = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
+def page_levels(pdf, species, matched):
+    """The centerpiece: a Grotrian-style term diagram (the standard convention).
+    x-axis = term, grouped by parity (even block | odd block), each ordered by
+    energy; y-axis = energy. J-levels are short horizontal ticks at their
+    energies; computed solid, NIST observed dashed. Fine structure that is
+    unresolved at this ordinate is reported precisely on the following table
+    page. (A 'fitted' series will be added once RCE output exists.)"""
+    panels = _group_terms(matched)
+    # split into even / odd parity blocks, each ordered by energy
+    even = [p for p in panels if p["par"] == "e"]
+    odd = [p for p in panels if p["par"] == "o"]
+    even.sort(key=_term_sort_key)
+    odd.sort(key=_term_sort_key)
 
-    xL, xR = 0.0, 0.5
-    for idx, (ax, p) in enumerate(zip(axes, panels)):
-        c = palette[idx % len(palette)]
-        lev = sorted(p["lev"], key=lambda x: x["E_calc"])
-        # stagger J labels vertically when fine-structure levels are unresolved
-        labelpts = []  # (y, text)
-        for m in lev:
+    # assign an x-slot to each term: even block on the left, odd on the right,
+    # with a gap between blocks.
+    layout = []   # (panel, x)
+    x = 0
+    for p in even:
+        layout.append((p, x)); x += 1
+    x += 1        # gap between parity blocks
+    for p in odd:
+        layout.append((p, x)); x += 1
+    nx = max(1, x)
+
+    fig, ax = plt.subplots(figsize=(max(7.0, 0.9 * nx + 2), 9.0))
+    fig.suptitle(f"{species}: term (Grotrian) diagram", fontsize=14, y=0.97)
+
+    half = 0.36
+    for p, xc in layout:
+        for m in p["lev"]:
             ec = m["E_calc"]; eo = m["E_obs"]
+            ax.hlines(ec, xc - half, xc + half, color="C0", lw=1.8)
+            if eo is not None:
+                ax.hlines(eo, xc - half, xc + half, color="C3", lw=1.4, ls="--")
+
+    # term labels under the x-axis (with superscripts)
+    ax.set_xticks([xc for _, xc in layout])
+    ax.set_xticklabels(
+        [rf"{_term_mathlabel(p['tk'], p['par'])}" for p, _ in layout],
+        fontsize=9)
+    # second-line config labels
+    ymin, ymax = ax.get_ylim()
+    for p, xc in layout:
+        ax.annotate(p["cfg"], xy=(xc, 0), xycoords=("data", "axes fraction"),
+                    xytext=(0, -28), textcoords="offset points",
+                    ha="center", va="top", fontsize=7, color="0.4")
+
+    # parity block headers
+    if even:
+        xe = np.mean([xc for p, xc in layout if p["par"] == "e"])
+        ax.text(xe, 1.01, "even parity", transform=ax.get_xaxis_transform(),
+                ha="center", va="bottom", fontsize=9, style="italic")
+    if odd:
+        xo = np.mean([xc for p, xc in layout if p["par"] == "o"])
+        ax.text(xo, 1.01, "odd parity", transform=ax.get_xaxis_transform(),
+                ha="center", va="bottom", fontsize=9, style="italic")
+
+    ax.set_xlim(-0.8, nx - 0.2)
+    ax.set_ylabel("Energy (cm$^{-1}$)")
+    ax.spines["bottom"].set_position(("outward", 0))
+
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], color="C0", lw=1.8, label="computed (ab initio)"),
+               Line2D([0], [0], color="C3", lw=1.4, ls="--", label="observed (NIST)")]
+    ax.legend(handles=handles, frameon=False, fontsize=9, loc="upper left")
+    fig.text(0.5, 0.01,
+             "Standard term diagram: columns are terms (grouped by parity), "
+             "ticks are J-levels. Solid = computed, dashed = observed. "
+             "Per-level energies and residuals are tabulated on the next page.",
+             ha="center", fontsize=8, style="italic")
+    fig.tight_layout(rect=[0.04, 0.05, 1, 0.94])
+    pdf.savefig(fig); plt.close(fig)
+
+    # ---- companion fine-structure table page ----
+    _page_level_table(pdf, species, panels)
+
+
+def _page_level_table(pdf, species, panels):
+    """Tabulate every level: config, term, J, E_calc, E_obs, delta E."""
+    rows = []
+    for p in panels:
+        for m in sorted(p["lev"], key=lambda x: x["E_calc"]):
             try:
                 Js = "%g" % float(m["J"])
             except (TypeError, ValueError):
                 Js = str(m["J"])
-            ax.hlines(ec, xL, xR, color=c, lw=2.0)                 # computed
-            labelpts.append((ec, f"J={Js}"))
-            if eo is not None:
-                ax.hlines(eo, xL, xR, color=c, lw=1.4, ls="--")    # NIST
-        # place J labels, nudging apart if they'd collide
-        Es_all = [m["E_calc"] for m in lev] + \
-                 [m["E_obs"] for m in lev if m["E_obs"] is not None]
-        yr = (max(Es_all) - min(Es_all)) if len(Es_all) > 1 else 1.0
-        minsep = 0.06 * max(yr, 1.0)
-        labelpts.sort()
-        placed = []
-        for y, t in labelpts:
-            yy = y
-            while placed and yy - placed[-1] < minsep:
-                yy = placed[-1] + minsep
-            placed.append(yy)
-            ax.text(xR + 0.04, yy, t, va="center", ha="left",
-                    fontsize=7.5, color=c)
-        # panel title = the term, with proper superscripts
-        ax.set_ylabel(rf"{p['cfg']}  {_term_mathlabel(p['tk'], p['par'])}",
-                      rotation=0, ha="right", va="center", fontsize=10,
-                      labelpad=28)
-        ax.set_xlim(-0.05, 1.2)
-        ax.set_xticks([])
-        ax.spines["bottom"].set_visible(False)
-        ax.tick_params(axis="y", labelsize=7)
-        # tight y-limits with a little padding
-        Es = [m["E_calc"] for m in lev] + \
-             [m["E_obs"] for m in lev if m["E_obs"] is not None]
-        if Es:
-            span = max(50.0, (max(Es) - min(Es)))
-            ax.set_ylim(min(Es) - 0.25 * span, max(Es) + 0.25 * span)
-
-    from matplotlib.lines import Line2D
-    handles = [Line2D([0], [0], color="0.3", lw=2.0, label="computed (ab initio)"),
-               Line2D([0], [0], color="0.3", lw=1.4, ls="--", label="observed (NIST)")]
-    axes[0].legend(handles=handles, frameon=False, fontsize=8, loc="upper right")
-    fig.text(0.5, 0.005,
-             "One panel per term (energy increasing upward). In each panel: "
-             "solid = computed (ab initio), dashed = observed (NIST); the vertical "
-             "gap is the error, and the spread is the fine-structure splitting.",
-             ha="center", fontsize=8, style="italic")
-    fig.tight_layout(rect=[0.06, 0.02, 1, 0.97])
-    pdf.savefig(fig); plt.close(fig)
+            eo = m["E_obs"]
+            term = _term_mathlabel(p["tk"], p["par"])
+            rows.append([p["cfg"], term, Js,
+                         f"{m['E_calc']:.1f}",
+                         (f"{eo:.1f}" if eo is not None else "--"),
+                         (f"{m['E_calc'] - eo:+.1f}" if eo is not None else "--")])
+    # paginate at ~40 rows/page
+    per = 40
+    for start in range(0, max(1, len(rows)), per):
+        chunk = rows[start:start + per]
+        fig, ax = plt.subplots(figsize=(7.5, 9.5)); ax.axis("off")
+        fig.suptitle(f"{species}: levels (computed vs observed)", fontsize=13,
+                     y=0.97)
+        col = ["config", "term", "J", "E_calc", "E_obs", "ΔE (cm⁻¹)"]
+        tbl = ax.table(cellText=chunk, colLabels=col, loc="upper center",
+                       cellLoc="center")
+        tbl.auto_set_font_size(False); tbl.set_fontsize(8.5)
+        tbl.scale(1, 1.3)
+        pdf.savefig(fig); plt.close(fig)
 
 
 def page_residuals(pdf, species, matched):
