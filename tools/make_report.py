@@ -588,12 +588,14 @@ def load_kurucz_levels(paths):
 
 def page_residuals(pdf, species, matched, unified_panels=None,
                    kurucz_levels=None):
-    """Residuals vs observed. With a fit (unified_panels), overlay ab initio
-    (circles) and fitted (diamonds) drawn from the SAME level set. Without a fit,
-    fall back to the ab-initio-only `matched` list."""
-    fig, ax = plt.subplots(figsize=(8.0, 5.0))
-    ax.axhline(0, color="k", lw=0.6)
-    title_bits = []
+    """Residuals vs observed, in TWO stacked panels: top shows the full y-range
+    (so the large ab-initio offsets are visible), bottom zooms to the FITTED
+    residuals (so the fit-quality comparison -- our RCE fit vs Kurucz's -- is
+    legible instead of collapsed onto zero by the ab-initio scale). With a fit
+    (unified_panels), ab initio (circles) and fitted (diamonds) come from the
+    SAME level set; without a fit, fall back to ab-initio-only `matched`."""
+    # collect series: (label, color, marker, open?, points Nx2, is_fit?)
+    series = []
     if unified_panels is not None:
         ab = [(m["E_obs"], m["E_calc"] - m["E_obs"])
               for p in unified_panels for m in p["lev"]
@@ -602,36 +604,53 @@ def page_residuals(pdf, species, matched, unified_panels=None,
               for p in unified_panels for m in p["lev"]
               if m.get("E_obs") is not None and m.get("E_fit") is not None]
         if ab:
-            a = np.array(ab)
-            ax.scatter(a[:, 0], a[:, 1], s=28, color="C0", zorder=3,
-                       label="ab initio")
-            title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(a[:,1]**2)):.0f}")
+            series.append(("ab initio", "C0", "o", False, np.array(ab), False))
         if ft:
-            d = np.array(ft)
-            ax.scatter(d[:, 0], d[:, 1], s=34, color="C3", marker="D", zorder=4,
-                       label="fitted (RCE)")
-            title_bits.append(f"fit RMS = {np.sqrt(np.mean(d[:,1]**2)):.0f}")
+            series.append(("fitted (RCE)", "C3", "D", False, np.array(ft), True))
     else:
         res = [(m["E_obs"], m["E_calc"] - m["E_obs"])
                for m in matched if m["matched"] and m["E_obs"] is not None]
         if res:
-            a = np.array(res)
-            ax.scatter(a[:, 0], a[:, 1], s=28, color="C0", zorder=3,
-                       label="ab initio")
-            title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(a[:,1]**2)):.0f}")
-        else:
-            ax.text(0.5, 0.5, "no matched levels", ha="center")
+            series.append(("ab initio", "C0", "o", False, np.array(res), False))
     if kurucz_levels:
-        k = np.array(kurucz_levels)
-        ax.scatter(k[:, 0], k[:, 1], s=26, facecolors="none", edgecolors="C2",
-                   marker="s", zorder=2, label="Kurucz (gfall fit)")
-        title_bits.append(f"Kurucz RMS = {np.sqrt(np.mean(k[:,1]**2)):.0f}")
-    ax.set_title(f"{species}: level residuals   "
-                 + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
-                    if title_bits else ""), fontsize=11)
-    ax.legend(frameon=False, fontsize=9)
-    ax.set_xlabel("Observed level  $E_\\mathrm{obs}$  (cm$^{-1}$)")
-    ax.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
+        series.append(("Kurucz (gfall fit)", "C2", "s", True,
+                       np.array(kurucz_levels), True))
+
+    title_bits = []
+    for label, col, mk, _, pts, _ in series:
+        title_bits.append(f"{label.split(' (')[0]} RMS = "
+                          f"{np.sqrt(np.mean(pts[:, 1] ** 2)):.0f}")
+
+    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 7.2),
+                                         sharex=True)
+
+    def _draw(ax):
+        ax.axhline(0, color="k", lw=0.6)
+        for label, col, mk, opn, pts, _ in series:
+            ax.scatter(pts[:, 0], pts[:, 1], s=28 if mk != "D" else 34,
+                       facecolors="none" if opn else col, edgecolors=col,
+                       marker=mk, zorder=3, label=label)
+
+    if not series:
+        a_full.text(0.5, 0.5, "no matched levels", ha="center")
+    else:
+        _draw(a_full)
+        _draw(a_zoom)
+        # zoom y-limit from the FITTED series only (so it isn't set by ab initio)
+        fit_pts = [pts for _, _, _, _, pts, isfit in series if isfit]
+        if fit_pts:
+            allfit = np.concatenate([p[:, 1] for p in fit_pts])
+            ylim = max(50.0, 1.15 * np.abs(allfit).max())
+            a_zoom.set_ylim(-ylim, ylim)
+
+    a_full.set_title(f"{species}: level residuals   "
+                     + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
+                        if title_bits else ""), fontsize=11)
+    a_full.legend(frameon=False, fontsize=9)
+    a_full.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
+    a_zoom.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
+    a_zoom.set_xlabel("Observed level  $E_\\mathrm{obs}$  (cm$^{-1}$)")
+    a_zoom.set_title("zoom to fitted residuals", fontsize=9)
     fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
 
