@@ -27,16 +27,24 @@ echo "[1/4] RCN"
 [ -f TAPE2N ] || ln -sf tape2n TAPE2N
 echo "[2/4] RCN2"
 "$BIN/rcn2" < /dev/null > rcn2_run.log 2>&1
-echo "[3/4] RCG  (writes OUTGINE template, OUTG11 with ab initio levels+gf)"
+echo "[3/6] RCG  (writes OUTGINE template, OUTG11 with ab initio levels+gf)"
 "$BIN/rcg"  < /dev/null > rcg_run.log  2>&1
 cp -f OUTG11 OUTG11.abinitio          # keep the pre-fit spectrum for comparison
+cp -f ING11  ING11.abinitio           # keep the ab initio parameter deck
 
-echo "[3.5] build INE20 (substitute NIST observed levels, free parameters)"
+echo "[4/6] build INE20 (substitute NIST observed levels, free parameters)"
 python3 "$ROOT/tools/build_ine20.py" --outgine OUTGINE --nist "$NIST" --out INE20
 cp -f INE20 OUTGINE                    # RCE reads the file named OUTGINE
 
-echo "[4/4] RCE  (semi-empirical least-squares fit)"
+echo "[5/6] RCE  (semi-empirical least-squares fit)"
 "$BIN/rce"  < /dev/null > rce_run.log  2>&1
+
+echo "[6/6] fitted gf: substitute RCE params into ING11, re-run RCG"
+python3 "$ROOT/tools/subst_fitted_params.py" \
+    --parvals PARVALS --ing11 ING11.abinitio --out ING11.fit
+cp -f ING11.fit ING11
+"$BIN/rcg"  < /dev/null > rcg_fit_run.log 2>&1
+cp -f OUTG11 OUTG11.fitted            # the fitted-parameter spectrum (fitted gf)
 
 echo "Done. RCE convergence:"
 grep -iE "Iteration No.*AVDEV" rce_run.log | tail -6 | sed 's/^/  /'
