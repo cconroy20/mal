@@ -1,4 +1,10 @@
 200-90 0 2  01.  4.0    5.E-08    1.E-11-2 00090 0 1.0  0.65  0.0 1.00   -6
    12    0Mg I   3s2              2p6  3s2
+   12    0Mg I   3s4s             2p6  3s   4s
+   12    0Mg I   3s3d             2p6  3s   3d
+   12    0Mg I   3s5s             2p6  3s   5s
+   12    0Mg I   3s4d             2p6  3s   4d
    12    0Mg I   3s3p             2p6  3s   3p
+   12    0Mg I   3s4p             2p6  3s   4p
+   12    0Mg I   3s5p             2p6  3s   5p
    -1
