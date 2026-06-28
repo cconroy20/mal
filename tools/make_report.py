@@ -399,11 +399,38 @@ def _attach_abinitio(calc, fitted):
     return fitted
 
 
-def build_unified_panels(calc, fitted):
+def _relabel_by_nist(fitted, nist):
+    """RCE labels a level by its plurality eigenvector component, which is
+    ambiguous for strongly-mixed levels (e.g. 3s3d J=2 at 57/42 % 3D/1D). But
+    each fitted level's E_obs value came FROM a specific NIST level whose term is
+    authoritative. Re-tag each fitted level's term/config by looking up its E_obs
+    in the NIST table (exact energy match), so the display is consistent with the
+    fit input."""
+    if not nist:
+        return fitted
+    by_E = {}
+    for o in nist:
+        by_E[round(o["E_obs"], 1)] = o          # E_obs in cm^-1
+    for m in fitted:
+        eo = m.get("E_obs")
+        if eo is None:
+            continue
+        o = by_E.get(round(eo, 1))
+        if o:
+            m["term"] = o["term"]
+            m["config"] = o["config"]
+            m["parity"] = o["parity"]
+    return fitted
+
+
+def build_unified_panels(calc, fitted, nist=None):
     """One authoritative level list (from LEVELS1) carrying E_calc/E_obs/E_fit,
     grouped into term panels. Both Grotrian pages and the table use THIS, so the
-    before/after layouts are identical."""
+    before/after layouts are identical. When `nist` is given, level term/config
+    labels are taken from the NIST identity of each level's E_obs (robust for
+    strongly-mixed levels)."""
     fitted = _attach_abinitio(calc, _dedup_levels1(fitted))
+    fitted = _relabel_by_nist(fitted, nist)
     groups = {}
     for m in fitted:
         key = (_cfgkey(m["config"]), _termkey(m["term"]), m["parity"])
@@ -429,7 +456,8 @@ def _dedup_levels1(fitted):
     return uniq
 
 
-def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None):
+def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None,
+                nist=None):
     """Centerpiece. When fitted data exist, both Grotrian pages share ONE panel
     set and ONE x-layout so paging gives a clean before/after:
       Page 1: ab initio (solid) + NIST (dashed)
@@ -437,7 +465,7 @@ def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None):
     Then the merged level table. Without a fit, falls back to the ab-initio-only
     diagram from `matched`."""
     if fitted:
-        panels = build_unified_panels(calc or [], fitted)
+        panels = build_unified_panels(calc or [], fitted, nist)
         layout = _grotrian_layout(panels)
         # shared y-range across both pages so paging is a clean before/after
         allE = []
@@ -696,7 +724,7 @@ def main():
     if a.levels1 and os.path.exists(a.levels1):
         fitted = parse_levels1(a.levels1) or None
         if fitted:
-            unified = build_unified_panels(calc, fitted)
+            unified = build_unified_panels(calc, fitted, nist)
 
     nist_lines = (load_nist_lines(a.nist_lines)
                   if a.nist_lines and os.path.exists(a.nist_lines) else None)
@@ -707,7 +735,7 @@ def main():
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
-        page_levels(pdf, a.species, matched, fitted, calc, ie_cm)
+        page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist)
         page_residuals(pdf, a.species, matched, unified)
         if nist_lines:
             page_gf(pdf, a.species, lines, fitted_lines, nist_lines)
