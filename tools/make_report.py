@@ -50,11 +50,11 @@ plt.rcParams.update({
     "font.family": "serif",
     "font.serif": [_FONT, "DejaVu Serif"],
     "mathtext.fontset": "dejavuserif",
-    "font.size": 10.5,
+    "font.size": 13,
     "axes.linewidth": 0.9,
-    "axes.titlesize": 11,
-    "axes.labelsize": 11,
-    "legend.fontsize": 9.5,
+    "axes.titlesize": 14,
+    "axes.labelsize": 14,
+    "legend.fontsize": 12,
     "xtick.direction": "in", "ytick.direction": "in",
     "xtick.top": True, "ytick.right": True,
     "xtick.major.size": 4, "ytick.major.size": 4,
@@ -657,17 +657,18 @@ def page_residuals(pdf, species, matched, unified_panels=None,
         series.append(("Kurucz (gfall fit)", COL_KURUCZ, MK_KURUCZ,
                        np.array(kurucz_levels), True))
 
-    title_bits = [f"{label.split(' (')[0]} RMS = "
-                  f"{np.sqrt(np.mean(pts[:, 1] ** 2)):.0f}"
-                  for label, _, _, pts, _ in series]
+    # RMS summary lives in the legend label (no top title)
+    leg = {label: f"{label}   RMS = {np.sqrt(np.mean(pts[:, 1] ** 2)):.0f} "
+                  "cm$^{-1}$" for label, _, _, pts, _ in series}
 
-    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 8.0),
-                                         sharex=True)
+    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 8.0))
+    xlab = "Observed level  $E_\\mathrm{obs}$  (cm$^{-1}$)"
+    ylab = "$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)"
 
     def _draw(ax):
         ax.axhline(0, color="0.5", lw=0.7, zorder=1)
         for label, col, mk, pts, _ in series:
-            _scatter(ax, pts[:, 0], pts[:, 1], col, mk, label)
+            _scatter(ax, pts[:, 0], pts[:, 1], col, mk, leg[label])
 
     if not series:
         a_full.text(0.5, 0.5, "no matched levels", ha="center")
@@ -681,14 +682,10 @@ def page_residuals(pdf, species, matched, unified_panels=None,
             ylim = max(50.0, 1.15 * np.abs(allfit).max())
             a_zoom.set_ylim(-ylim, ylim)
 
-    a_full.set_title(f"{species}: level residuals   "
-                     + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
-                        if title_bits else ""))
     a_full.legend(frameon=False)
-    a_full.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
-    a_zoom.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
-    a_zoom.set_xlabel("Observed level  $E_\\mathrm{obs}$  (cm$^{-1}$)")
-    a_zoom.set_title("zoom to fitted residuals", fontsize=9.5)
+    for ax in (a_full, a_zoom):
+        ax.set_xlabel(xlab)
+        ax.set_ylabel(ylab)
     fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
 
@@ -841,7 +838,24 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
     else:
         glo, ghi = -3.0, 1.0
 
+    # RMS summary (strong / all) lives in the legend label (no top title)
+    leg = {}
+    for label, col, mk, pairs in series:
+        if not pairs:
+            leg[label] = label
+            continue
+        c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
+        d = c - nlg
+        strong = nlg >= strong_cut
+        rms_all = np.sqrt(np.mean(d ** 2))
+        rms_strong = (np.sqrt(np.mean(d[strong] ** 2)) if strong.any()
+                      else float("nan"))
+        leg[label] = (f"{label}   RMS = {rms_strong:.2f} strong, "
+                      f"{rms_all:.2f} all")
+
     fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 8.0), sharex=False)
+    xlab = "NIST $\\log gf$"
+    ylab = "$\\Delta\\log gf$ (model $-$ NIST)"
 
     def _draw(ax):
         ax.axhline(0, color="0.5", lw=0.7, zorder=1)
@@ -850,25 +864,11 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
                 continue
             c = np.array([p[0] for p in pairs])
             nlg = np.array([p[1] for p in pairs])
-            _scatter(ax, nlg, c - nlg, col, mk, label)
-
-    title_bits = []
-    for label, col, mk, pairs in series:
-        if not pairs:
-            continue
-        c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
-        d = c - nlg
-        strong = nlg >= strong_cut
-        rms_all = np.sqrt(np.mean(d ** 2))
-        rms_strong = (np.sqrt(np.mean(d[strong] ** 2)) if strong.any()
-                      else float("nan"))
-        title_bits.append(f"{label}: strong RMS={rms_strong:.2f} "
-                          f"(all {rms_all:.2f})")
+            _scatter(ax, nlg, c - nlg, col, mk, leg[label])
 
     _draw(a_full)
     _draw(a_zoom)
     a_full.set_xlim(glo, ghi); a_full.set_ylim(-1.0, 1.0)
-    a_full.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
     a_full.legend(frameon=False, loc="lower left")
 
     # zoom: x to strong lines; y from a ROBUST spread of the strong residuals
@@ -882,16 +882,10 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
     else:
         yl = 0.5
     a_zoom.set_ylim(-yl, yl)
-    a_zoom.set_xlabel("NIST $\\log gf$")
-    a_zoom.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
-    a_zoom.set_title(f"zoom to strong lines (NIST $\\log gf \\geq {strong_cut:g}$)",
-                     fontsize=9.5)
-
-    sub = ("\n".join(title_bits) + "   [dex; strong = log gf $\\geq$ "
-           f"{strong_cut:g}]" if title_bits else "")
-    fig.suptitle(f"{species}: gf comparison vs NIST\n{sub}", y=0.995)
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
-    pdf.savefig(fig); plt.close(fig)
+    for ax in (a_full, a_zoom):
+        ax.set_xlabel(xlab)
+        ax.set_ylabel(ylab)
+    fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
 
 # ----------------------------------------------------------------------------
