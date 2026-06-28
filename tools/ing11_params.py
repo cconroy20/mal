@@ -39,6 +39,43 @@ def _is_ci(line):
     return " - " in line[0:18] and "hf" in line[68:80]
 
 
+def values_by_key(path):
+    """Map {key -> value} for EVERY single-config and CI field in `path`,
+    regardless of group code (unlike parse(), which returns only adjustable
+    params). Used to look up a parameter's ab-initio value as a ridge-prior
+    centre even when that field is held fixed (group 0) in the ab-initio deck."""
+    with open(path) as f:
+        raw = f.readlines()
+    out = {}
+    first = True
+    for ln in raw:
+        s = ln.rstrip("\n")
+        if _is_singleconf(s):
+            cfg = s[0:18].strip()
+            if not first:
+                try:
+                    out[f"{cfg}|EAV"] = int(s[20:30]) / SCALE_EAV
+                except ValueError:
+                    pass
+            first = False
+            o = 30
+            for slot in range(4):
+                try:
+                    out[f"{cfg}|P{slot}"] = int(s[o:o + 9]) / SCALE_P
+                except ValueError:
+                    pass
+                o += 10
+        elif _is_ci(s):
+            pair = s[0:18].strip()
+            o = 20
+            for slot in range(5):
+                m = re.match(r"\s*(-?\d+\.\d+)", s[o:o + 10][:-1])
+                if m:
+                    out[f"{pair}|CI{slot}"] = float(m.group(1))
+                o += 10
+    return out
+
+
 def parse(path):
     """Return (lines, params). `lines` is the raw file (list of str, no newline
     stripping issues). `params` is an ordered list of dicts:

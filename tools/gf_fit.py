@@ -20,10 +20,19 @@ Forward model: write a trial parameter vector into ING11 via ing11_params, run
 RCG (~8 ms for Mg I), parse levels + gf from OUTG11, match to NIST by
 eigenvector-composition identity (make_report).
 
+Regularization: --ridge applies a per-parameter Gaussian PRIOR pulling each
+radial parameter toward its ab-initio Hartree-Fock value (--abinitio), with a
+per-kind width (PRIOR_SIGMA: loose EAV, tighter Slater, tightest CI). This is a
+smooth, general form of Bob Kurucz's FIXEDHF discipline -- the data overrides the
+prior where it has information, and the prior keeps the rest near HF, making the
+otherwise rank-deficient fit well-posed (full-rank Jacobian -> usable covariance).
+ridge~1 keeps Mg I gf quality (~0.08 dex) while curing the rank deficiency.
+
 Usage:
-    tools/gf_fit.py --run-dir work/mg1 --seed work/mg1/ING11.abinitio \
+    tools/gf_fit.py --run-dir work/mg1 --seed work/mg1/ING11.fit \
+        --abinitio work/mg1/ING11.abinitio \
         --nist data/nist/MgI_levels.tsv --nist-lines data/nist/MgI_lines.tsv \
-        --lambda 1.0 [--ridge 0.0] [--maxiter 4000]
+        --lambda 3 --ridge 1.0 [--free-kinds EAV,P] [--maxiter 6000]
 """
 import argparse
 import os
@@ -46,6 +55,15 @@ def _jstr(J):
     except (ValueError, TypeError):
         return None
 
+# Per-kind ridge-PRIOR width (Bob-style discipline as a smooth prior): how far,
+# in RELATIVE terms, the data is allowed to pull each parameter away from its
+# ab-initio Hartree-Fock value. Loose on EAVs (centroids -- data should move
+# them freely); tighter on single-config Slater F/G/zeta ('P'); tightest on CI
+# interaction integrals (least trusted to fit, à la Bob's FIXEDHF for CI). These
+# are fractional sigmas; sigma -> inf reproduces an unregularized free fit, small
+# sigma approaches a hard freeze. Scaled by the global --ridge knob.
+PRIOR_SIGMA = {"EAV": 1.0, "P": 0.30, "CI": 0.15}
+
 # NIST accuracy class -> approx 1-sigma uncertainty in log gf (dex), ASD legend.
 ACC_DEX = {"AAA": 0.013, "AA": 0.013, "A+": 0.013, "A": 0.022, "B+": 0.043,
            "B": 0.087, "C+": 0.13, "C": 0.22, "D+": 0.30, "D": 0.43, "E": 0.70}
@@ -61,15 +79,30 @@ class Forward:
     """Black-box forward model: params -> RCG -> (levels, gf), with NIST targets
     precomputed so each evaluation just runs RCG and matches."""
 
-    def __init__(self, run_dir, seed_ing11, nist_path, nist_lines_path):
+    def __init__(self, run_dir, seed_ing11, nist_path, nist_lines_path,
+                 free_kinds=None, abinitio_ing11=None):
         self.run_dir = os.path.abspath(run_dir)
         self.ing11 = os.path.join(self.run_dir, "ING11")
         self.outg11 = os.path.join(self.run_dir, "OUTG11")
         self.rcg = os.path.join(os.path.dirname(self.run_dir), "..",
                                 "build", "bin", "rcg")
         self.rcg = os.path.abspath(self.rcg)
-        self.raw, self.params = IP.parse(seed_ing11)
+        self.raw, allp = IP.parse(seed_ing11)
+        # Bob-style discipline: optionally restrict the FREE set to certain
+        # parameter kinds (e.g. {"EAV"} or {"EAV","P"}); the rest stay pinned at
+        # their ab-initio seed value (IP.write only touches self.params). 'P' =
+        # single-config Slater/zeta (F^k,G^k,zeta); 'CI' = interaction integrals.
+        self.params = ([p for p in allp if p["kind"] in free_kinds]
+                       if free_kinds else allp)
         self.seed = np.array([p["value"] for p in self.params])
+        # Ridge-prior CENTRES = ab-initio (HF) values per free param, looked up
+        # by key from the ab-initio ING11; fall back to the seed value if absent.
+        # Per-kind PRIOR_SIGMA sets how far data may pull each from its centre.
+        abv = IP.values_by_key(abinitio_ing11) if abinitio_ing11 else {}
+        self.prior_centre = np.array([abv.get(p["key"], p["value"])
+                                      for p in self.params])
+        self.prior_sigma = np.array([PRIOR_SIGMA.get(p["kind"], 1.0)
+                                     for p in self.params])
         self.nist = R.load_nist(nist_path)
         self.nist_lines = R.load_nist_lines(nist_lines_path)
         # NIST level lookup by robust identity (cfgkey, termkey, Jkey)
@@ -232,11 +265,15 @@ class Forward:
 
     def resid_vector(self, x, scale, lam, ridge):
         """Stacked weighted residual vector for least_squares:
-            [ (E_calc-E_obs)/SIGMA_E  per level slot,
-              sqrt(lam)*(loggf-NIST)/sigma_gf  per line slot,
-              sqrt(ridge)*(x-1)  (optional) ]
-        Slots are tracked by energy rank, so the vector has constant length and
-        smooth entries -> 0.5*||vec||^2 matches the scalar chi2."""
+            [ (E_calc-E_obs)/SIGMA_E              per level slot,
+              sqrt(lam)*(loggf-NIST)/sigma_gf     per line slot,
+              sqrt(ridge)*(theta-theta_HF)/(sigma_kind*|theta_HF|)  per param ]
+        The last block is a per-parameter GAUSSIAN PRIOR pulling each radial
+        parameter toward its ab-initio Hartree-Fock value with a per-kind width
+        (PRIOR_SIGMA): a smooth, general form of Bob's FIXEDHF discipline (hard
+        freeze = sigma->0; free fit = ridge=0). Slots are tracked by energy rank,
+        so the vector has constant length and smooth entries -> 0.5*||vec||^2 is
+        the regularized chi2."""
         self.run(x * scale)
         blocks = self._block_levels()
         line_rows = self._current_line_rows()
@@ -256,7 +293,9 @@ class Forward:
             r = line_rows.get(slotpair)
             vec.append(sl * (r - nist) / sigma if r is not None else 0.0)
         if ridge:
-            vec.extend(np.sqrt(ridge) * (np.asarray(x) - 1.0))
+            theta = np.asarray(x) * scale
+            denom = self.prior_sigma * np.maximum(np.abs(self.prior_centre), 1e-6)
+            vec.extend(np.sqrt(ridge) * (theta - self.prior_centre) / denom)
         return np.asarray(vec)
 
 
@@ -277,7 +316,9 @@ def make_objective(fwd, lam, ridge):
         if len(gres):
             chi2 += lam * np.sum((gres / gsig) ** 2)
         if ridge:
-            chi2 += ridge * np.sum((x - 1.0) ** 2)   # pull toward seed
+            # same per-parameter HF prior as resid_vector (||.||^2 form)
+            denom = fwd.prior_sigma * np.maximum(np.abs(fwd.prior_centre), 1e-6)
+            chi2 += ridge * np.sum(((values - fwd.prior_centre) / denom) ** 2)
         return chi2
 
     return obj, scale
@@ -353,10 +394,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-dir", required=True)
     ap.add_argument("--seed", required=True, help="ING11 to seed from.")
+    ap.add_argument("--abinitio", default=None,
+                    help="ab-initio ING11 for the ridge-prior centres (HF "
+                         "values). Defaults to the seed if omitted.")
     ap.add_argument("--nist", required=True)
     ap.add_argument("--nist-lines", required=True)
+    ap.add_argument("--free-kinds", default=None,
+                    help="comma list restricting the free set, e.g. 'EAV' or "
+                         "'EAV,P' (P=Slater/zeta, CI=interaction). Default: all.")
     ap.add_argument("--lambda", dest="lam", type=float, default=1.0)
-    ap.add_argument("--ridge", type=float, default=0.0)
+    ap.add_argument("--ridge", type=float, default=0.0,
+                    help="ridge-prior strength: pull each param toward its HF "
+                         "value with per-kind width (PRIOR_SIGMA). 0 = free fit.")
     ap.add_argument("--maxiter", type=int, default=4000)
     ap.add_argument("--method", choices=["lm", "nelder-mead"], default="lm",
                     help="lm = Levenberg-Marquardt on the residual vector "
@@ -365,8 +414,12 @@ def main():
     ap.add_argument("--out", default=None, help="write fitted ING11 here.")
     a = ap.parse_args()
 
-    fwd = Forward(a.run_dir, a.seed, a.nist, a.nist_lines)
-    print(f"{len(fwd.params)} adjustable params; seeded from {a.seed}")
+    free_kinds = (set(k.strip() for k in a.free_kinds.split(","))
+                  if a.free_kinds else None)
+    fwd = Forward(a.run_dir, a.seed, a.nist, a.nist_lines,
+                  free_kinds=free_kinds, abinitio_ing11=a.abinitio)
+    print(f"{len(fwd.params)} adjustable params; seeded from {a.seed}"
+          + (f"; ridge prior centred on {a.abinitio}" if a.abinitio else ""))
     report(fwd, fwd.seed, "seed")
 
     if a.method == "lm":
