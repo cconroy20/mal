@@ -179,58 +179,113 @@ def _segments(energies, gap_factor=4.0, min_gap=3000.0):
             for a, b in segs]
 
 
+_LMAP = {"S": 0, "P": 1, "D": 2, "F": 3, "G": 4, "H": 5, "I": 6, "K": 7}
+
+
+def _term_mathlabel(term, parity):
+    """LaTeX-style term label with real superscript multiplicity and a degree
+    marker for odd parity, e.g. ('3P','o') -> '$^{3}\\!P^{\\circ}$'."""
+    tk = _termkey(term)              # e.g. '3P'
+    m = re.match(r"(\d+)([A-Z])", tk)
+    if not m:
+        return tk
+    mult, L = m.group(1), m.group(2)
+    deg = r"^{\circ}" if parity == "o" else ""
+    return rf"$^{{{mult}}}\!{L}{deg}$"
+
+
+def _term_sort_key(term_panel):
+    """Order term panels by mean energy (set by caller)."""
+    return term_panel["E_mean"]
+
+
 def page_levels(pdf, species, matched):
-    """The centerpiece: computed vs NIST level diagram on a broken energy axis.
-    (A 'fitted' column will be added when RCE output is available.)"""
-    cols = {"calc": 0.0, "obs": 1.0}
-    col_label = {"calc": "Computed\n(ab initio)", "obs": "Observed\n(NIST)"}
+    """The centerpiece: energy levels grouped ONE PANEL PER TERM, ordered by
+    energy. Within a panel, each J-level is drawn as computed (solid) and NIST
+    observed (dashed) at the same x, so the vertical gap is the per-level error
+    and the fine-structure splitting is visible. Levels labelled by J.
+    (A 'fitted' series will be added when RCE output is available.)"""
+    # group matched levels by (config, termkey, parity)
+    groups = {}
+    for m in matched:
+        key = (_cfgkey(m.get("config", "")), _termkey(m["term"]),
+               m.get("parity", "e"))
+        groups.setdefault(key, []).append(m)
 
-    all_E = [m["E_calc"] for m in matched]
-    all_E += [m["E_obs"] for m in matched if m["E_obs"] is not None]
-    segs = _segments(all_E)
-    segs = segs[::-1]  # high energy at top
+    panels = []
+    for (cfg, tk, par), lev in groups.items():
+        Es = [x["E_calc"] for x in lev] + \
+             [x["E_obs"] for x in lev if x["E_obs"] is not None]
+        panels.append({"cfg": cfg, "tk": tk, "par": par, "lev": lev,
+                       "E_mean": np.mean(Es) if Es else 0.0})
+    panels.sort(key=_term_sort_key)          # low energy at bottom
+    panels = panels[::-1]                     # high energy at top
 
-    n = len(segs)
-    heights = [(b - a) for a, b in segs]
-    fig, axes = plt.subplots(n, 1, figsize=(7.0, max(8.0, 1.6 * n + 4)),
-                             gridspec_kw={"height_ratios": heights},
-                             squeeze=False)
+    # one panel per term, but keep the whole figure to ~letter size: paginate
+    # if there are many terms (cap panels per page).
+    n = len(panels)
+    fig, axes = plt.subplots(n, 1, figsize=(7.5, 9.5), squeeze=False)
     axes = axes[:, 0]
-    fig.suptitle(f"{species}: energy levels  (computed vs observed)",
-                 fontsize=13, y=0.99)
+    fig.suptitle(f"{species}: energy levels (one panel per term)",
+                 fontsize=13, y=0.995)
 
-    def color_for(term):
-        key = _termkey(term)
-        palette = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
-        return palette[hash(key) % len(palette)]
+    palette = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
 
-    for ax, (lo, hi) in zip(axes, segs):
-        for m in matched:
+    xL, xR = 0.0, 0.5
+    for idx, (ax, p) in enumerate(zip(axes, panels)):
+        c = palette[idx % len(palette)]
+        lev = sorted(p["lev"], key=lambda x: x["E_calc"])
+        # stagger J labels vertically when fine-structure levels are unresolved
+        labelpts = []  # (y, text)
+        for m in lev:
             ec = m["E_calc"]; eo = m["E_obs"]
-            c = color_for(m["term"])
-            if lo <= ec <= hi:
-                ax.hlines(ec, cols["calc"] - 0.36, cols["calc"] + 0.36,
-                          color=c, lw=1.6)
-            if eo is not None and lo <= eo <= hi:
-                ax.hlines(eo, cols["obs"] - 0.36, cols["obs"] + 0.36,
-                          color=c, lw=1.6)
-            # connector if both endpoints fall in this segment
-            if eo is not None and lo <= ec <= hi and lo <= eo <= hi:
-                ax.plot([cols["calc"] + 0.36, cols["obs"] - 0.36], [ec, eo],
-                        color=c, lw=0.5, ls="--", alpha=0.6)
-        ax.set_ylim(lo, hi)
-        ax.set_xlim(-0.6, 1.6)
-        ax.set_xticks(list(cols.values()))
-        ax.set_xticklabels(list(col_label.values()))
+            try:
+                Js = "%g" % float(m["J"])
+            except (TypeError, ValueError):
+                Js = str(m["J"])
+            ax.hlines(ec, xL, xR, color=c, lw=2.0)                 # computed
+            labelpts.append((ec, f"J={Js}"))
+            if eo is not None:
+                ax.hlines(eo, xL, xR, color=c, lw=1.4, ls="--")    # NIST
+        # place J labels, nudging apart if they'd collide
+        Es_all = [m["E_calc"] for m in lev] + \
+                 [m["E_obs"] for m in lev if m["E_obs"] is not None]
+        yr = (max(Es_all) - min(Es_all)) if len(Es_all) > 1 else 1.0
+        minsep = 0.06 * max(yr, 1.0)
+        labelpts.sort()
+        placed = []
+        for y, t in labelpts:
+            yy = y
+            while placed and yy - placed[-1] < minsep:
+                yy = placed[-1] + minsep
+            placed.append(yy)
+            ax.text(xR + 0.04, yy, t, va="center", ha="left",
+                    fontsize=7.5, color=c)
+        # panel title = the term, with proper superscripts
+        ax.set_ylabel(rf"{p['cfg']}  {_term_mathlabel(p['tk'], p['par'])}",
+                      rotation=0, ha="right", va="center", fontsize=10,
+                      labelpad=28)
+        ax.set_xlim(-0.05, 1.2)
+        ax.set_xticks([])
         ax.spines["bottom"].set_visible(False)
-        ax.tick_params(axis="x", length=0)
-        ax.set_ylabel("E (cm$^{-1}$)")
+        ax.tick_params(axis="y", labelsize=7)
+        # tight y-limits with a little padding
+        Es = [m["E_calc"] for m in lev] + \
+             [m["E_obs"] for m in lev if m["E_obs"] is not None]
+        if Es:
+            span = max(50.0, (max(Es) - min(Es)))
+            ax.set_ylim(min(Es) - 0.25 * span, max(Es) + 0.25 * span)
 
-    axes[-1].set_xlabel("")
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], color="0.3", lw=2.0, label="computed (ab initio)"),
+               Line2D([0], [0], color="0.3", lw=1.4, ls="--", label="observed (NIST)")]
+    axes[0].legend(handles=handles, frameon=False, fontsize=8, loc="upper right")
     fig.text(0.5, 0.005,
-             "Ticks = levels, colored by term; dashed lines connect the same "
-             "level (computed -> observed). Energy axis is broken between "
-             "clusters.", ha="center", fontsize=8, style="italic")
+             "One panel per term (energy increasing upward). In each panel: "
+             "solid = computed (ab initio), dashed = observed (NIST); the vertical "
+             "gap is the error, and the spread is the fine-structure splitting.",
+             ha="center", fontsize=8, style="italic")
+    fig.tight_layout(rect=[0.06, 0.02, 1, 0.97])
     pdf.savefig(fig); plt.close(fig)
 
 
@@ -286,7 +341,8 @@ def main():
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
         page_levels(pdf, a.species, matched)
         page_residuals(pdf, a.species, matched)
-        page_gf(pdf, a.species, lines)
+        # gf-vs-wavelength page deferred: only meaningful once RCE produces many
+        # lines and we have a reference (Kurucz/lab) gf to compare against.
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST)")
 
