@@ -54,5 +54,19 @@ cp -f ING11.fit ING11
 "$BIN/rcg"  < /dev/null > rcg_fit_run.log 2>&1
 cp -f OUTG11 OUTG11.fitted            # the fitted-parameter spectrum (fitted gf)
 
+# Optional Tier-2 step: combined energy+gf fit (gf_fit.py). Seeds from the RCE
+# fit and adds well-measured NIST gf to the objective; lambda=3 is the sweep
+# optimum for Mg I (notes/mg1_gf_analysis.md). Enable with GFFIT=1 ./run_mg1.sh
+if [ -n "$GFFIT" ]; then
+  echo "[7/7] combined energy+gf fit (lambda=${GFLAMBDA:-3})"
+  python3 "$ROOT/tools/gf_fit.py" --run-dir "$RUN" --seed ING11.fit \
+      --nist "$NIST" --nist-lines "$ROOT/data/nist/MgI_lines.tsv" \
+      --lambda "${GFLAMBDA:-3}" --maxiter "${GFMAXITER:-8000}" \
+      --out ING11.gffit
+  cp -f ING11.gffit ING11
+  "$BIN/rcg" < /dev/null > rcg_gffit_run.log 2>&1
+  cp -f OUTG11 OUTG11.gffit          # the combined energy+gf spectrum
+fi
+
 echo "Done. RCE convergence:"
 grep -iE "Iteration No.*AVDEV" rce_run.log | tail -6 | sed 's/^/  /'

@@ -652,7 +652,8 @@ def match_gf_by_identity(outg11_path, nist_lines):
     return pairs
 
 
-def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines):
+def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
+            gf_fitted_label="fitted (RCE)"):
     """Single gf-comparison page overlaying ab initio (circles) and fitted
     (diamonds) against NIST, like the level-residual page. Left: 1:1 scatter
     (model vs NIST); right: residual (model - NIST) vs wavelength. Both panels
@@ -664,7 +665,7 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines):
         series.append(("ab initio", "C0", "o",
                        match_gf_by_identity(abinitio_path, nist_lines)))
     if fitted_path:
-        series.append(("fitted (RCE)", "C3", "D",
+        series.append((gf_fitted_label, "C3", "D",
                        match_gf_by_identity(fitted_path, nist_lines)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
@@ -680,7 +681,16 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines):
                    edgecolors=col, marker=mk, zorder=3, label=label)
         a2.scatter(lam, c - nlg, s=28, facecolors="none" if mk == "o" else col,
                    edgecolors=col, marker=mk, zorder=3, label=label)
-        title_bits.append(f"{label} RMS={np.sqrt(np.mean((c-nlg)**2)):.2f}")
+        # report BOTH the all-line RMS and the strong-line (log gf >= -1) RMS:
+        # the fit targets strong, well-measured lines, so the all-line number
+        # (dominated by excluded weak C/D lines) understates the result.
+        d = c - nlg
+        strong = nlg >= -1.0
+        rms_all = np.sqrt(np.mean(d ** 2))
+        rms_strong = (np.sqrt(np.mean(d[strong] ** 2)) if strong.any()
+                      else float("nan"))
+        title_bits.append(f"{label}: strong RMS={rms_strong:.2f} "
+                          f"(all {rms_all:.2f})")
 
     a1.set_xlim(-8, 1); a1.set_ylim(-8, 1)
     a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel("model $\\log gf$")
@@ -694,10 +704,11 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines):
     a2.set_title("residuals", fontsize=10)
     a2.legend(frameon=False, fontsize=9, loc="upper right")
 
-    fig.suptitle(f"{species}: gf comparison vs NIST   "
-                 + ("(" + ", ".join(title_bits) + " dex)" if title_bits else ""),
-                 fontsize=12, y=0.99)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    sub = ("\n".join(title_bits) + "   [dex; strong = log gf $\\geq$ -1]"
+           if title_bits else "")
+    fig.suptitle(f"{species}: gf comparison vs NIST\n{sub}",
+                 fontsize=11, y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
     pdf.savefig(fig); plt.close(fig)
 
 
@@ -714,6 +725,8 @@ def main():
                     help="ionization-energy table (species<TAB>IE_cm1).")
     ap.add_argument("--gf-fitted", default=None,
                     help="OUTG11 from the fitted-parameter RCG run (fitted gf).")
+    ap.add_argument("--gf-fitted-label", default="fitted (RCE)",
+                    help="legend label for the fitted-gf series on the gf page.")
     ap.add_argument("--nist-lines", default=None,
                     help="cached NIST lines table (reference log gf).")
     ap.add_argument("--fit-rms", type=float, default=None)
@@ -742,7 +755,8 @@ def main():
         page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist)
         page_residuals(pdf, a.species, matched, unified)
         if nist_lines:
-            page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines)
+            page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines,
+                    gf_fitted_label=a.gf_fitted_label)
     nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "

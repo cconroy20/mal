@@ -26,9 +26,30 @@ of 0.114, and 57% better than energy-only RCE), AND levels to 26.5 cm^-1. The
 weak lines deliberately excluded from the objective (e.g. 3s4s 3S -> 3s5p 3P,
 NIST class C/D) are unchanged, as intended. This is the Tier-1.5/Tier-2 thesis
 demonstrated end to end on one ion: a gf-aware fit recovers gf accuracy the
-energy-only fit threw away. NEXT: tune lambda; add per-line gf MC uncertainties
-on top of this loop; try ridge-toward-ab-initio (--ridge) for ill-conditioned
-ions; carry to Fe II.
+energy-only fit threw away.
+
+### lambda sweep (tools/gf_fit_sweep.py, seed = RCE-fitted ING11)
+
+    lambda  levelRMS(cm^-1)  strong-gf RMS  acc-wtd gf RMS
+     0.1         9.0            0.160          0.168
+     0.3        18.8            0.092          0.106
+     1          26.5            0.081          0.086
+     3          37.0            0.093          0.069   <- chosen
+     10        167.8            0.089          0.071
+
+Trade-off is clear: too small (lambda<=0.1) ~ energy-only (gf degrades); too
+large (lambda>=10) blows up levels with no gf gain. lambda=1..3 is the sweet
+spot. **Chose lambda=3**: minimizes the accuracy-weighted gf RMS (0.069, the
+most defensible metric since it down-weights poorly-measured lines), levels
+still excellent (37 cm^-1). Independently via gf_table on the final OUTG11:
+strong+A/B gf RMS **0.063** (vs ab-initio 0.114 = 45% better), acc-wtd 0.098.
+The report PDF gf page now shows this fit ("fitted (energy+gf)"), with the title
+reporting strong-line RMS (log gf >= -1), not the weak-line-dominated all-line
+RMS. Reproduce: `GFFIT=1 ./work/run_mg1.sh` (lambda via GFLAMBDA), then
+`tools/report_mg1.sh`.
+
+NEXT: add per-line gf MC uncertainties on top of this loop (the UQ deliverable);
+try ridge-toward-ab-initio (--ridge) for ill-conditioned ions; carry to Fe II.
 
 ---
 
