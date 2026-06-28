@@ -534,16 +534,43 @@ def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None,
         _page_level_table_simple(pdf, species, panels)
 
 
-def _table_pages(pdf, ttl, col, rows):
-    per = 38
+def _table_pages(pdf, ttl, col, rows, numeric_from=None):
+    """Render a borderless, journal-style table across pages. No cell outlines;
+    a bold larger header with a single rule beneath it, faint zebra striping for
+    readability, and right-aligned numeric columns (those at index >= numeric_from).
+    """
+    per = 34
+    ncol = len(col)
     for start in range(0, max(1, len(rows)), per):
         chunk = rows[start:start + per]
         fig, ax = plt.subplots(figsize=(8.5, 9.5)); ax.axis("off")
-        fig.suptitle(ttl, fontsize=12, y=0.97)
+        ax.set_title(ttl, fontsize=13, pad=16)
         tbl = ax.table(cellText=chunk, colLabels=col, loc="upper center",
                        cellLoc="center")
-        tbl.auto_set_font_size(False); tbl.set_fontsize(8)
-        tbl.scale(1, 1.3)
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(9.5)
+        tbl.scale(1, 1.45)
+
+        for (r, c), cell in tbl.get_celld().items():
+            cell.set_edgecolor("none")            # remove ALL outlines
+            cell.PAD = 0.04
+            if r == 0:                            # header row
+                cell.get_text().set_fontsize(11)
+                cell.get_text().set_fontweight("bold")
+                cell.set_facecolor("white")
+                # single rule under the header
+                cell.visible_edges = "B"
+                cell.set_edgecolor("0.25")
+                cell.set_linewidth(1.1)
+            else:
+                # faint zebra striping
+                cell.set_facecolor("#f2f2f2" if (r % 2 == 0) else "white")
+            # right-align numeric columns, left-align label columns
+            if numeric_from is not None and r > 0:
+                if c >= numeric_from:
+                    cell.get_text().set_ha("right"); cell.PAD = 0.06
+                elif c < 2:
+                    cell.get_text().set_ha("left"); cell.PAD = 0.06
         pdf.savefig(fig); plt.close(fig)
 
 
@@ -567,9 +594,12 @@ def _page_level_table(pdf, species, panels):
                 (f"{ef:.1f}" if ef is not None else "--"),
                 (f"{ef - eo:+.1f}" if (ef is not None and eo is not None) else "--"),
             ])
-    col = ["config", "term", "J", "E_obs", "E_calc", "Δ_abinit", "E_fit", "Δ_fit"]
+    col = ["config", "term", "$J$", "$E_\\mathrm{obs}$", "$E_\\mathrm{abinit}$",
+           "$\\Delta_\\mathrm{abinit}$", "$E_\\mathrm{fit}$",
+           "$\\Delta_\\mathrm{fit}$"]
     _table_pages(pdf, f"{species}: levels — ab initio & fitted vs observed "
-                 "(cm$^{-1}$)", col, rows)
+                 "(cm$^{-1}$)", col, rows,
+                 numeric_from=3)   # right-align the energy columns
 
 
 def _page_level_table_simple(pdf, species, panels):
@@ -586,8 +616,10 @@ def _page_level_table_simple(pdf, species, panels):
             rows.append([p["cfg"], term, Js, f"{m['E_calc']:.1f}",
                          (f"{eo:.1f}" if eo is not None else "--"),
                          (f"{m['E_calc'] - eo:+.1f}" if eo is not None else "--")])
-    col = ["config", "term", "J", "E_calc", "E_obs", "$\\Delta E$ (cm$^{-1}$)"]
-    _table_pages(pdf, f"{species}: levels (computed vs observed)", col, rows)
+    col = ["config", "term", "$J$", "$E_\\mathrm{abinit}$", "$E_\\mathrm{obs}$",
+           "$\\Delta E$ (cm$^{-1}$)"]
+    _table_pages(pdf, f"{species}: levels (computed vs observed)", col, rows,
+                 numeric_from=3)
 
 
 def load_kurucz_levels(paths):
