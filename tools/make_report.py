@@ -669,8 +669,16 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
                        match_gf_by_identity(fitted_path, nist_lines)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
-    # fixed, shared ranges (independent of which series) for easy comparison
-    a1.plot([-8, 1], [-8, 1], color="0.6", lw=0.8, ls="--", zorder=1)
+    # data-driven log gf range (both model and NIST values, both series) with a
+    # small margin, shared by both panels so points compare directly.
+    allg = [v for _, _, _, pairs in series for p in pairs for v in (p[0], p[1])]
+    if allg:
+        lo, hi = min(allg), max(allg)
+        m = 0.05 * (hi - lo) + 0.1
+        glo, ghi = lo - m, hi + m
+    else:
+        glo, ghi = -3.0, 1.0
+    a1.plot([glo, ghi], [glo, ghi], color="0.6", lw=0.8, ls="--", zorder=1)
     title_bits = []
     for label, col, mk, pairs in series:
         if not pairs:
@@ -691,13 +699,13 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
         title_bits.append(f"{label}: strong RMS={rms_strong:.2f} "
                           f"(all {rms_all:.2f})")
 
-    a1.set_xlim(-8, 1); a1.set_ylim(-8, 1)
+    a1.set_xlim(glo, ghi); a1.set_ylim(glo, ghi)
     a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel("model $\\log gf$")
     a1.set_title("1:1 comparison", fontsize=10)
     a1.legend(frameon=False, fontsize=9, loc="upper left")
 
     a2.axhline(0, color="k", lw=0.6)
-    a2.set_xlim(-8, 1); a2.set_ylim(-1.0, 1.0)
+    a2.set_xlim(glo, ghi); a2.set_ylim(-1.0, 1.0)
     a2.set_xlabel("NIST $\\log gf$")
     a2.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
     a2.set_title("residuals", fontsize=10)
