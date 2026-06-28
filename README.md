@@ -33,7 +33,11 @@ See `docs/` and the planning notes for the full rationale and research basis.
 - [x] **Cowan kernel builds & runs on macOS/arm64 (gfortran 15).** All four
       programs (RCN, RCN2, RCG, RCE) compile; RCG generates the CFP decks and
       runs to normal exit. See `notes/build_notes.md`.
-- [ ] Run a known example through the full RCN→RCN2→RCG→RCE chain.
+- [x] **Worked example end to end (Sn^7+).** RCN->RCN2->RCG drives the shipped
+      `IN36`+`IN2` deck to a real line list: converged radial wavefunctions
+      (`rwfn.dat`) and ~1700 E1 transitions with energy levels + log gf
+      (`OUTG11`). Reproduce with `work/run_sn7plus.sh`; figures in the explainer.
+- [ ] Add observed levels and run RCE (the semi-empirical fit) on the example.
 - [ ] Reproduce a known Kurucz Fe II gf (first deliverable).
 - [ ] Prototype a modern regularized fit + per-line gf UQ on Fe II.
 

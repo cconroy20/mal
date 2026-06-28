@@ -23,3 +23,8 @@ cowan_nist/extracted/**/*.dll
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+# Worked-example run outputs (regenerate with work/run_sn7plus.sh)
+work/sn7plus/
+# illustrative orbital fig superseded by sn7p_orbitals.pdf
+docs/figs/orbitals.pdf

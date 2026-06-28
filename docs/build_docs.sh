@@ -5,9 +5,14 @@ export PATH="/Library/TeX/texbin:$PATH"
 cd "$(dirname "$0")"
 
 # regenerate figures first (idempotent)
-if command -v python3 >/dev/null && [ -f make_figs.py ]; then
+if command -v python3 >/dev/null; then
   echo "Generating figures ..."
-  python3 make_figs.py
+  [ -f make_figs.py ] && python3 make_figs.py            # illustrative (kernel, schematic)
+  if [ -f ../work/sn7plus/OUTG11 ]; then
+    python3 make_worked_figs.py                          # worked example (real run)
+  else
+    echo "  (skipping worked figs: run build/bin/{rcn,rcn2,rcg} in work/sn7plus first)"
+  fi
 fi
 
 for tex in *.tex; do

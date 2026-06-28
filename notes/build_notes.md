@@ -23,6 +23,15 @@ arm64), PLUS `-std=legacy -fallow-argument-mismatch`:
    **Physics-neutral** — supplies the same constant + IMPLICIT typing.
 2. **Symlink** `RCGPAR.F -> rcgpar.f` so the uppercase `INCLUDE 'RCGPAR.F'`
    resolves on case-sensitive filesystems (Linux); on macOS HFS it's moot.
+3. **RCN36K.F, SUBROUTINE OUTPT (after label 930, ~line 2507):** added a
+   **physics-neutral output-only** dump of the converged radial wavefunctions to
+   `rwfn.dat` (per orbital: header with config/label/occupation/mesh, then the
+   `(r, P_nl(r))` table). Placed on the guaranteed-executed path (where the 912
+   and 917 branches merge), uses local index vars `mdmp/idmp/jj` to avoid
+   clobbering loop variables, and `position='append'` so multiple configurations
+   accumulate. Used only for plotting (see docs/make_worked_figs.py); does not
+   change any computed quantity. Verified: orbitals come out normalized
+   (∫P²dr = 1.0000) with correct shell radii for Sn7+ (Z=50).
 
 ## Warnings (benign, not errors)
 Many `-fallow-argument-mismatch` warnings in rcg11k.f and RCE20K.F: legacy F77

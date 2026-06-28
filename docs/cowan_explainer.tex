@@ -98,17 +98,20 @@ used, optionally with relativistic corrections (the ``HFR'' / ``HXR'' options
 A converged set of these single-electron radial functions is shown in
 Fig.~\ref{fig:orbitals}: $P_{n\ell}(r) = r\,R_{n\ell}(r)$ is the quantity the
 code actually carries on its radial mesh, with $\int_0^\infty P_{n\ell}^2\,dr=1$.
-The number of radial nodes ($n-\ell-1$) and the outward march of the orbitals
-with $n$ are exactly what determine the sizes of the radial integrals below.
+These are the \emph{actual} self-consistent-field orbitals from our build of
+\prog{rcn} for Sn$^{7+}$ ($4d^7$), our worked example (\S\ref{sec:worked}). Note
+the nodal structure ($n-\ell-1$ nodes: $1s$ nodeless, $2s$ one node, \dots) and
+that the orbitals are pulled in to small radius by the high nuclear charge
+($Z=50$): the $1s$ peaks near $r\approx0.02\,a_0$, while the $4d$ valence orbital
+peaks near $0.9\,a_0$.
 
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.74\textwidth]{orbitals.pdf}
-\caption{Reduced radial wavefunctions $P_{n\ell}(r)=r\,R_{n\ell}(r)$.
-\emph{(Illustrative: exact hydrogenic functions, $Z=1$; a real \prog{rcn} run
-produces the self-consistent-field analogues for the actual ion.)} Note the
-nodal structure --- $1s,2p,3d$ are nodeless, $2s,3p$ have one node --- and that
-higher-$n$ orbitals peak at larger radius.}
+\includegraphics[width=0.78\textwidth]{sn7p_orbitals.pdf}
+\caption{Self-consistent reduced radial wavefunctions
+$P_{n\ell}(r)=r\,R_{n\ell}(r)$ for Sn$^{7+}$ $4d^7$, computed by our build of
+\prog{rcn} (the nine occupied subshells $1s$ through $4d$). Each is normalized to
+$\int P_{n\ell}^2\,dr=1$. This is real output of the engine, not a model.}
 \label{fig:orbitals}
 \end{figure}
 
@@ -316,22 +319,54 @@ and upper levels of E1 transitions) are listed, terminated by \texttt{-1}. The
 columns of this card are documented in \file{cowan\_nist/extracted/RCN\_DOC.txt};
 we will annotate them in detail when we drive a real run.
 
-\section{What ``running it'' looks like end to end}
+\section{A worked example: Sn$^{7+}$ end to end}
+\label{sec:worked}
 
 For a single ion and one parity pair, the canonical chain is
 \[
-\prog{rcn} \to \prog{rcn2} \to \prog{rcg} \to \prog{rce} \to \prog{rcg}
+\prog{rcn} \to \prog{rcn2} \to \prog{rcg} \;(\to \prog{rce} \to \prog{rcg}) ,
 \]
-(the final \prog{rcg} re-run applies the fitted parameters to emit final levels
-and $gf$). The seven coupling schemes \prog{rcg}/\prog{rce} support
-(LS, JJ, intermediate, \dots) only change the basis, not the physics; final
-eigenvectors are reported in LS or JJ for interpretation.
+where the optional final \prog{rce}/\prog{rcg} steps apply the semi-empirical fit.
+We have run the first three stages on the shipped example
+(\file{work/IN36}+\file{IN2}): Sn$^{7+}$ with the even configuration $4d^7$ and
+the odd configuration $4d^6 5p$. The exact run lives in \file{work/sn7plus/}; the
+figures in this document are generated from its output by
+\file{docs/make\_worked\_figs.py}.
+
+\begin{itemize}[nosep]
+\item \prog{rcn} converged the self-consistent field for all nine subshells of
+each configuration and wrote the radial integrals to \file{out36} (e.g.\ for
+$4d^7$ it gives $\zeta_{4d}=3762\ \mathrm{cm^{-1}}$, $F^2(4d,4d)$, $F^4(4d,4d)$).
+Its converged orbitals are Fig.~\ref{fig:orbitals}.
+\item \prog{rcn2} formed the CI and transition integrals and wrote \file{ING11}.
+\item \prog{rcg} built and diagonalized the energy matrix for each $J$, producing
+$\sim$1700 electric-dipole transitions between the two configurations, each with a
+wavelength, $\log gf$, and radiative rate. The resulting computed spectrum is
+Fig.~\ref{fig:spectrum} --- a genuine (purely \emph{ab initio}, not yet fitted)
+line list produced by our build of the engine.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.86\textwidth]{sn7p_spectrum.pdf}
+\caption{The computed electric-dipole spectrum of Sn$^{7+}$
+($4d^7\!-\!4d^6 5p$): $\log gf$ versus wavelength for the $\sim$1700 transitions
+from \prog{rcg}. The band near 200--280\,\AA{} and the spread of line strengths
+over many orders of magnitude are typical of an open-$d$-shell transition array.
+These are raw \emph{ab initio} values; the \prog{rce} fit (\S\ref{sec:rce})
+would shift the levels onto observed energies and adjust the $gf$ accordingly.}
+\label{fig:spectrum}
+\end{figure}
+
+The seven coupling schemes \prog{rcg}/\prog{rce} support (LS, JJ, intermediate,
+\dots) only change the basis, not the physics; final eigenvectors are reported in
+LS or JJ for interpretation.
 
 \paragraph{Next steps in the project.}
 \begin{enumerate}[nosep]
-\item Drive the shipped example (\file{IN36}) through the full chain and read
-each output file together, annotating the real column formats --- and replace the
-illustrative figures here with the actual computed $P_{n\ell}(r)$ and level fit.
+\item Add observed levels and run \prog{rce} on this example to see the
+semi-empirical fit in action (replace the schematic Fig.~\ref{fig:semiemp} with
+the real computed-vs-observed level comparison).
 \item Reproduce a known Kurucz Fe\,\textsc{ii} $gf$ via the standard chain
 (validate we replicate the legacy result).
 \item Replace the \prog{rce} fit \eqref{eq:chi2} with a modern regularized /

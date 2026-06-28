@@ -2505,6 +2505,23 @@ c
   925 do 926 i=k,kkk,5
   926 pnl(i,m)=0.0
   930 continue
+c
+c     === C.Conroy/Claude 2026-06-28: dump converged radial wavefunctions ===
+c     Physics-neutral output only, on the guaranteed-executed path (both the
+c     912 and 917 branches merge at label 917 above).  Appends to 'rwfn.dat':
+c     per orbital a header (config, label nlbcd, occ wwnl, mesh) then the
+c     (r, P_nl(r)) table.  For plotting; does not affect any computed result.
+      open(71,file='rwfn.dat',status='unknown',position='append')
+      do 8801 mdmp=1,ncspvs
+        write (71,8810) (conf(jj),jj=1,3), nlbcd(mdmp), wwnl(mdmp), mesh
+        do 8802 idmp=1,mesh
+          write (71,8811) r(idmp), pnl(idmp,mdmp)
+ 8802   continue
+ 8801 continue
+ 8810 format ('# ',3a6,'  label=',a8,'  occ=',f7.2,'  mesh=',i5)
+ 8811 format (1p,e16.8,1x,e16.8)
+c     === end dump ===
+c
       kkk=min(kkk,mesh-5)
 c
       if (iptvu.lt.4) go to 945
