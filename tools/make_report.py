@@ -676,10 +676,9 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
         if not pairs:
             continue
         c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
-        lam = np.array([p[2] for p in pairs])
         a1.scatter(nlg, c, s=28, facecolors="none" if mk == "o" else col,
                    edgecolors=col, marker=mk, zorder=3, label=label)
-        a2.scatter(lam, c - nlg, s=28, facecolors="none" if mk == "o" else col,
+        a2.scatter(nlg, c - nlg, s=28, facecolors="none" if mk == "o" else col,
                    edgecolors=col, marker=mk, zorder=3, label=label)
         # report BOTH the all-line RMS and the strong-line (log gf >= -1) RMS:
         # the fit targets strong, well-measured lines, so the all-line number
@@ -698,8 +697,8 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
     a1.legend(frameon=False, fontsize=9, loc="upper left")
 
     a2.axhline(0, color="k", lw=0.6)
-    a2.set_ylim(-1.0, 1.0)
-    a2.set_xlabel("Wavelength (Å)")
+    a2.set_xlim(-8, 1); a2.set_ylim(-1.0, 1.0)
+    a2.set_xlabel("NIST $\\log gf$")
     a2.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
     a2.set_title("residuals", fontsize=10)
     a2.legend(frameon=False, fontsize=9, loc="upper right")
