@@ -32,3 +32,7 @@ docs/figs/orbitals.pdf
 # Mg I warm-up run outputs (regenerate with work/run_mg1.sh); keep the deck
 work/mg1/*
 !work/mg1/in36
+
+# Bob Kurucz reference decks/outputs fetched from kurucz.harvard.edu/atoms
+# (large; fetch with tools/fetch_kurucz_ref.sh rather than committing)
+kurucz_ref/
