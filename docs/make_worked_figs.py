@@ -123,8 +123,7 @@ def read_outg11_spectrum(path):
 def fig_spectrum():
     lam, loggf = read_outg11_spectrum(os.path.join(RUN, "OUTG11"))
     fig, ax = plt.subplots(figsize=(6.8, 4.0))
-    ax.vlines(lam, -9, loggf, color="C0", lw=0.9, alpha=0.85)
-    ax.scatter(lam, loggf, s=14, color="C0", zorder=3)
+    ax.scatter(lam, loggf, s=9, color="C0", alpha=0.6, edgecolors="none")
     ax.set_xlabel("Wavelength $\\lambda$  (Å)")
     ax.set_ylabel(r"$\log gf$")
     ax.set_title(r"Computed E1 spectrum of Sn$^{7+}$: "
