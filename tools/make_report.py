@@ -37,10 +37,48 @@ from matplotlib.backends.backend_pdf import PdfPages
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parse_cowan import parse_outg11, parse_levels1  # noqa: E402
 
+# --- house style -----------------------------------------------------------
+# A nicer typeface (Charter: a clean serif designed for technical text) with
+# matching mathtext, and a small curated palette shared across all pages so the
+# same series is the same colour/marker everywhere. Falls back gracefully if the
+# font is missing on another machine.
+import matplotlib.font_manager as _fm
+_HAVE = {f.name for f in _fm.fontManager.ttflist}
+_FONT = next((f for f in ("Charter", "PT Serif", "Palatino", "Georgia",
+                          "DejaVu Serif") if f in _HAVE), "serif")
 plt.rcParams.update({
-    "font.size": 10, "axes.linewidth": 0.8,
+    "font.family": "serif",
+    "font.serif": [_FONT, "DejaVu Serif"],
+    "mathtext.fontset": "dejavuserif",
+    "font.size": 10.5,
+    "axes.linewidth": 0.9,
+    "axes.titlesize": 11,
+    "axes.labelsize": 11,
+    "legend.fontsize": 9.5,
+    "xtick.direction": "in", "ytick.direction": "in",
+    "xtick.top": True, "ytick.right": True,
+    "xtick.major.size": 4, "ytick.major.size": 4,
     # keep all four spines: every plot is fully boxed by axes
 })
+
+# Curated series palette (slate blue / brick red / muted teal-green), used for
+# ab initio, our fit, and Kurucz respectively on every page.
+COL_ABINITIO = "#3b6ea5"   # slate blue
+COL_FIT      = "#b0413e"   # brick red
+COL_KURUCZ   = "#3f8f6b"   # muted teal-green
+
+# Distinct OPEN marker per series (same shape/colour for a series on every page).
+MK_ABINITIO = "o"
+MK_FIT      = "D"
+MK_KURUCZ   = "s"
+_MK_SIZE = 30
+
+
+def _scatter(ax, x, y, color, marker, label=None):
+    """House scatter: always-open markers, consistent size/weight, used on every
+    comparison page so series look identical across pages."""
+    ax.scatter(x, y, s=_MK_SIZE, facecolors="none", edgecolors=color,
+               marker=marker, linewidths=1.1, zorder=3, label=label)
 
 
 # ----------------------------------------------------------------------------
@@ -528,8 +566,8 @@ def _page_level_table(pdf, species, panels):
                 (f"{ef - eo:+.1f}" if (ef is not None and eo is not None) else "--"),
             ])
     col = ["config", "term", "J", "E_obs", "E_calc", "Δ_abinit", "E_fit", "Δ_fit"]
-    _table_pages(pdf, f"{species}: levels — ab initio & fitted vs observed (cm⁻¹)",
-                 col, rows)
+    _table_pages(pdf, f"{species}: levels — ab initio & fitted vs observed "
+                 "(cm$^{-1}$)", col, rows)
 
 
 def _page_level_table_simple(pdf, species, panels):
@@ -546,7 +584,7 @@ def _page_level_table_simple(pdf, species, panels):
             rows.append([p["cfg"], term, Js, f"{m['E_calc']:.1f}",
                          (f"{eo:.1f}" if eo is not None else "--"),
                          (f"{m['E_calc'] - eo:+.1f}" if eo is not None else "--")])
-    col = ["config", "term", "J", "E_calc", "E_obs", "ΔE (cm⁻¹)"]
+    col = ["config", "term", "J", "E_calc", "E_obs", "$\\Delta E$ (cm$^{-1}$)"]
     _table_pages(pdf, f"{species}: levels (computed vs observed)", col, rows)
 
 
@@ -594,7 +632,7 @@ def page_residuals(pdf, species, matched, unified_panels=None,
     legible instead of collapsed onto zero by the ab-initio scale). With a fit
     (unified_panels), ab initio (circles) and fitted (diamonds) come from the
     SAME level set; without a fit, fall back to ab-initio-only `matched`."""
-    # collect series: (label, color, marker, open?, points Nx2, is_fit?)
+    # collect series: (label, color, marker, points Nx2, is_fit?)
     series = []
     if unified_panels is not None:
         ab = [(m["E_obs"], m["E_calc"] - m["E_obs"])
@@ -604,32 +642,32 @@ def page_residuals(pdf, species, matched, unified_panels=None,
               for p in unified_panels for m in p["lev"]
               if m.get("E_obs") is not None and m.get("E_fit") is not None]
         if ab:
-            series.append(("ab initio", "C0", "o", False, np.array(ab), False))
+            series.append(("ab initio", COL_ABINITIO, MK_ABINITIO,
+                           np.array(ab), False))
         if ft:
-            series.append(("fitted (RCE)", "C3", "D", False, np.array(ft), True))
+            series.append(("fitted (RCE)", COL_FIT, MK_FIT,
+                           np.array(ft), True))
     else:
         res = [(m["E_obs"], m["E_calc"] - m["E_obs"])
                for m in matched if m["matched"] and m["E_obs"] is not None]
         if res:
-            series.append(("ab initio", "C0", "o", False, np.array(res), False))
+            series.append(("ab initio", COL_ABINITIO, MK_ABINITIO,
+                           np.array(res), False))
     if kurucz_levels:
-        series.append(("Kurucz (gfall fit)", "C2", "s", True,
+        series.append(("Kurucz (gfall fit)", COL_KURUCZ, MK_KURUCZ,
                        np.array(kurucz_levels), True))
 
-    title_bits = []
-    for label, col, mk, _, pts, _ in series:
-        title_bits.append(f"{label.split(' (')[0]} RMS = "
-                          f"{np.sqrt(np.mean(pts[:, 1] ** 2)):.0f}")
+    title_bits = [f"{label.split(' (')[0]} RMS = "
+                  f"{np.sqrt(np.mean(pts[:, 1] ** 2)):.0f}"
+                  for label, _, _, pts, _ in series]
 
-    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 7.2),
+    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 8.0),
                                          sharex=True)
 
     def _draw(ax):
-        ax.axhline(0, color="k", lw=0.6)
-        for label, col, mk, opn, pts, _ in series:
-            ax.scatter(pts[:, 0], pts[:, 1], s=28 if mk != "D" else 34,
-                       facecolors="none" if opn else col, edgecolors=col,
-                       marker=mk, zorder=3, label=label)
+        ax.axhline(0, color="0.5", lw=0.7, zorder=1)
+        for label, col, mk, pts, _ in series:
+            _scatter(ax, pts[:, 0], pts[:, 1], col, mk, label)
 
     if not series:
         a_full.text(0.5, 0.5, "no matched levels", ha="center")
@@ -637,7 +675,7 @@ def page_residuals(pdf, species, matched, unified_panels=None,
         _draw(a_full)
         _draw(a_zoom)
         # zoom y-limit from the FITTED series only (so it isn't set by ab initio)
-        fit_pts = [pts for _, _, _, _, pts, isfit in series if isfit]
+        fit_pts = [pts for _, _, _, pts, isfit in series if isfit]
         if fit_pts:
             allfit = np.concatenate([p[:, 1] for p in fit_pts])
             ylim = max(50.0, 1.15 * np.abs(allfit).max())
@@ -645,12 +683,12 @@ def page_residuals(pdf, species, matched, unified_panels=None,
 
     a_full.set_title(f"{species}: level residuals   "
                      + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
-                        if title_bits else ""), fontsize=11)
-    a_full.legend(frameon=False, fontsize=9)
+                        if title_bits else ""))
+    a_full.legend(frameon=False)
     a_full.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
     a_zoom.set_ylabel("$E_\\mathrm{model} - E_\\mathrm{obs}$  (cm$^{-1}$)")
     a_zoom.set_xlabel("Observed level  $E_\\mathrm{obs}$  (cm$^{-1}$)")
-    a_zoom.set_title("zoom to fitted residuals", fontsize=9)
+    a_zoom.set_title("zoom to fitted residuals", fontsize=9.5)
     fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
 
@@ -775,72 +813,84 @@ def match_kurucz_gf(kurucz_lines, nist_lines, tol=0.01):
 
 
 def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
-            gf_fitted_label="fitted (RCE)", kurucz_lines=None):
-    """Single gf-comparison page overlaying ab initio (circles) and fitted
-    (diamonds) against NIST, like the level-residual page. Left: 1:1 scatter
-    (model vs NIST); right: residual (model - NIST) vs wavelength. Both panels
-    are fully boxed and share fixed ranges so the two series compare directly.
-    Lines are matched to NIST by eigenvector-composition identity (see
-    match_gf_by_identity), not by term-pair + nearest wavelength."""
+            gf_fitted_label="fitted (RCE)", kurucz_lines=None, strong_cut=-1.0):
+    """gf-comparison page, laid out like the level-residuals page: TWO stacked
+    panels of (model - NIST) log gf vs NIST log gf. Top spans the full log gf
+    range; bottom zooms to the strong, well-measured lines (NIST log gf >=
+    strong_cut), the regime the fit actually targets, so their scatter isn't
+    swamped by the weak-line tail. Lines are matched to NIST by eigenvector-
+    composition identity (config+term+J), not nearest wavelength."""
+    # series: (label, color, marker, pairs) where pairs = (model, nist, x=nist)
     series = []
     if abinitio_path:
-        series.append(("ab initio", "C0", "o",
+        series.append(("ab initio", COL_ABINITIO, MK_ABINITIO,
                        match_gf_by_identity(abinitio_path, nist_lines)))
     if fitted_path:
-        series.append((gf_fitted_label, "C3", "D",
+        series.append((gf_fitted_label, COL_FIT, MK_FIT,
                        match_gf_by_identity(fitted_path, nist_lines)))
     if kurucz_lines:
-        series.append(("Kurucz (gfall)", "C2", "s",
+        series.append(("Kurucz (gfall)", COL_KURUCZ, MK_KURUCZ,
                        match_kurucz_gf(kurucz_lines, nist_lines)))
 
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
-    # data-driven log gf range (both model and NIST values, both series) with a
-    # small margin, shared by both panels so points compare directly.
-    allg = [v for _, _, _, pairs in series for p in pairs for v in (p[0], p[1])]
-    if allg:
-        lo, hi = min(allg), max(allg)
+    # full NIST-log gf range across all series, with a margin
+    alln = [p[1] for _, _, _, pairs in series for p in pairs]
+    if alln:
+        lo, hi = min(alln), max(alln)
         m = 0.05 * (hi - lo) + 0.1
         glo, ghi = lo - m, hi + m
     else:
         glo, ghi = -3.0, 1.0
-    a1.plot([glo, ghi], [glo, ghi], color="0.6", lw=0.8, ls="--", zorder=1)
+
+    fig, (a_full, a_zoom) = plt.subplots(2, 1, figsize=(8.0, 8.0), sharex=False)
+
+    def _draw(ax):
+        ax.axhline(0, color="0.5", lw=0.7, zorder=1)
+        for label, col, mk, pairs in series:
+            if not pairs:
+                continue
+            c = np.array([p[0] for p in pairs])
+            nlg = np.array([p[1] for p in pairs])
+            _scatter(ax, nlg, c - nlg, col, mk, label)
+
     title_bits = []
     for label, col, mk, pairs in series:
         if not pairs:
             continue
         c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
-        a1.scatter(nlg, c, s=28, facecolors="none" if mk == "o" else col,
-                   edgecolors=col, marker=mk, zorder=3, label=label)
-        a2.scatter(nlg, c - nlg, s=28, facecolors="none" if mk == "o" else col,
-                   edgecolors=col, marker=mk, zorder=3, label=label)
-        # report BOTH the all-line RMS and the strong-line (log gf >= -1) RMS:
-        # the fit targets strong, well-measured lines, so the all-line number
-        # (dominated by excluded weak C/D lines) understates the result.
         d = c - nlg
-        strong = nlg >= -1.0
+        strong = nlg >= strong_cut
         rms_all = np.sqrt(np.mean(d ** 2))
         rms_strong = (np.sqrt(np.mean(d[strong] ** 2)) if strong.any()
                       else float("nan"))
         title_bits.append(f"{label}: strong RMS={rms_strong:.2f} "
                           f"(all {rms_all:.2f})")
 
-    a1.set_xlim(glo, ghi); a1.set_ylim(glo, ghi)
-    a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel("model $\\log gf$")
-    a1.set_title("1:1 comparison", fontsize=10)
-    a1.legend(frameon=False, fontsize=9, loc="upper left")
+    _draw(a_full)
+    _draw(a_zoom)
+    a_full.set_xlim(glo, ghi); a_full.set_ylim(-1.0, 1.0)
+    a_full.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
+    a_full.legend(frameon=False, loc="lower left")
 
-    a2.axhline(0, color="k", lw=0.6)
-    a2.set_xlim(glo, ghi); a2.set_ylim(-1.0, 1.0)
-    a2.set_xlabel("NIST $\\log gf$")
-    a2.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
-    a2.set_title("residuals", fontsize=10)
-    a2.legend(frameon=False, fontsize=9, loc="upper right")
+    # zoom: x to strong lines; y from a ROBUST spread of the strong residuals
+    # (90th pct), so a few large outliers don't blow the window back open --
+    # the point of the zoom is to read the bulk fit quality near zero.
+    a_zoom.set_xlim(strong_cut - 0.1, ghi)
+    strong_d = np.array([p[0] - p[1] for _, _, _, pairs in series for p in pairs
+                         if p[1] >= strong_cut])
+    if strong_d.size:
+        yl = max(0.25, 1.25 * np.percentile(np.abs(strong_d), 90))
+    else:
+        yl = 0.5
+    a_zoom.set_ylim(-yl, yl)
+    a_zoom.set_xlabel("NIST $\\log gf$")
+    a_zoom.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
+    a_zoom.set_title(f"zoom to strong lines (NIST $\\log gf \\geq {strong_cut:g}$)",
+                     fontsize=9.5)
 
-    sub = ("\n".join(title_bits) + "   [dex; strong = log gf $\\geq$ -1]"
-           if title_bits else "")
-    fig.suptitle(f"{species}: gf comparison vs NIST\n{sub}",
-                 fontsize=11, y=0.995)
-    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    sub = ("\n".join(title_bits) + "   [dex; strong = log gf $\\geq$ "
+           f"{strong_cut:g}]" if title_bits else "")
+    fig.suptitle(f"{species}: gf comparison vs NIST\n{sub}", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     pdf.savefig(fig); plt.close(fig)
 
 
