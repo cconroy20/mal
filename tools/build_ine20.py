@@ -148,10 +148,12 @@ def fmt_flags(flags):
     return "".join(f"{f:10d}" for f in flags)
 
 
-def build(outgine_path, nist_levels, computed_terms, out_path, free_ci_with=()):
+def build(outgine_path, nist_levels, computed_terms, out_path, free_ci_with=(),
+          freeze=()):
     with open(outgine_path) as f:
         lines = f.readlines()
-    _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with)
+    _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with,
+                   freeze)
 
 
 def _infer_block_parity(header_block_lines):
@@ -171,7 +173,8 @@ def _infer_block_parity(header_block_lines):
     return "o" if lsum % 2 else "e"
 
 
-def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()):
+def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=(),
+                   freeze=()):
     """Walk blocks; within each, replace consecutive (value-line, flag-line)
     pairs (one per J, ascending from the block's minimum J) with observed
     levels. Each computed J-slot (energy-ordered) is matched to the observed
@@ -249,7 +252,7 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
             # line). We free single-configuration physical parameters (EAV,
             # ZETA, F^k, G^k) by setting their code 100 -> 0, and keep the
             # configuration-interaction parameters (names like '120D1212') fixed.
-            pnames = _parse_param_names(hdr)
+            pnames, pcfgs = _parse_param_names(hdr)
             gc_start = j
             gc_lines = []
             while j < n and _is_groupcode_line(lines[j]):
@@ -261,9 +264,11 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
                 newcodes = []
                 for L, code in enumerate(codes):
                     name = pnames[L] if L < len(pnames) else ""
+                    cfg = pcfgs[L] if L < len(pcfgs) else None
                     if (_is_physical_param(name)
                             and not _is_eav_reference(name, L,
-                                                      block_index == 0)):
+                                                      block_index == 0)
+                            and not _is_frozen(name, cfg, freeze)):
                         newcodes.append(0)        # free physical param
                     elif _is_free_ci(name, free_ci_with):
                         newcodes.append(0)        # free selected CI integral
@@ -283,10 +288,12 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
 
 def _parse_param_names(hdr_lines):
     """Parameter names are A6,A4 (10-char) fields packed 7 per line, appearing
-    after the config-names line in the block header. Return ordered list."""
-    # the config-names line has the species + config tokens; the parameter-name
-    # lines are those containing tokens like 'EAV', 'ZETA', 'G1(12)', '120D1212'.
-    names = []
+    after the config-names line in the block header. Return (names, configs):
+    two parallel ordered lists, where configs[i] is the configuration that owns
+    parameter names[i]. Each 'EAV  <cfg>' field opens a new config; subsequent
+    non-EAV params (ZETA, F^k, G^k) belong to that config until the next EAV."""
+    names, configs = [], []
+    cur_cfg = None
     started = False
     for ln in hdr_lines:
         if re.search(r"\bEAV\b|ZETA|^\s*[FG]\d", ln) or started:
@@ -296,11 +303,16 @@ def _parse_param_names(hdr_lines):
                 s = ln.rstrip("\n")
                 for c in range(0, len(s), 10):
                     field = s[c:c + 10].strip()
-                    if field:
-                        names.append(field)
+                    if not field:
+                        continue
+                    m = re.match(r"EAV\s+(\S+)", field)
+                    if m:
+                        cur_cfg = m.group(1)
+                    names.append(field)
+                    configs.append(cur_cfg)
             elif started:
                 break
-    return names
+    return names, configs
 
 
 def _is_physical_param(name):
@@ -330,6 +342,23 @@ def _is_free_ci(name, free_ci_pairs):
     return frozenset(pair) in free_ci_pairs
 
 
+def _is_frozen(name, cfg, freeze):
+    """Hold a single-configuration physical parameter at its ab-initio value
+    instead of letting the energy fit move it. `freeze` is a set of (config,
+    param-prefix) tuples, e.g. ('3s4d','G2') or ('3s5p','G1'). Use this for
+    UNDER-CONSTRAINED Rydberg exchange/Slater integrals that the levels fit can
+    drive to unphysical values (e.g. G->0), wrecking the gf even as energies
+    improve. Matching is by config substring + param name prefix; an empty
+    config in the tuple freezes that param prefix in EVERY config."""
+    if not freeze or not cfg:
+        return False
+    nm = name.strip()
+    for fc, fp in freeze:
+        if nm.startswith(fp) and (not fc or fc == cfg):
+            return True
+    return False
+
+
 def _is_eav_reference(name, L, is_first_block):
     """Hold ONLY the global ground-state EAV (first EAV of the first/even block)
     fixed as the energy zero. Every other block's EAV must be free, or its
@@ -348,16 +377,30 @@ def main():
                     help="comma-separated config PAIRS (1-based, 'i-j') whose CI "
                          "integral should be freed, e.g. '1-6' for 3s^2-3p^2. "
                          "Target specific pairs to avoid over-freeing.")
+    ap.add_argument("--freeze-params", default="",
+                    help="comma-separated 'config:PARAM' to HOLD at ab-initio "
+                         "value (not freed by the energy fit), e.g. "
+                         "'3s4d:G2,3s5p:G1'. Use for under-constrained Rydberg "
+                         "exchange integrals the fit drives unphysical, which "
+                         "wrecks gf. Empty config ':G1' freezes that param in "
+                         "all configs.")
     a = ap.parse_args()
     free_ci = set()
     for tok in a.free_ci_pairs.split(","):
         tok = tok.strip()
         if "-" in tok:
             i, j = tok.split("-"); free_ci.add(frozenset((int(i), int(j))))
+    freeze = set()
+    for tok in a.freeze_params.split(","):
+        tok = tok.strip()
+        if ":" in tok:
+            cfg, prm = tok.split(":", 1)
+            freeze.add((cfg.strip(), prm.strip()))
     nist = load_nist_levels(a.nist)
     cterms = load_computed_terms(a.outg11)
-    build(a.outgine, nist, cterms, a.out, free_ci)
-    print(f"wrote {a.out}  (free CI with configs {free_ci or 'none'})")
+    build(a.outgine, nist, cterms, a.out, free_ci, freeze)
+    print(f"wrote {a.out}  (free CI with configs {free_ci or 'none'}; "
+          f"frozen params {freeze or 'none'})")
 
 
 if __name__ == "__main__":

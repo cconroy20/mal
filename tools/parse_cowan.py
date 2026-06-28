@@ -139,6 +139,48 @@ def parse_compositions(path):
     return out
 
 
+def identify_lines(path, etol=2.0):
+    """Attach ROBUST upper/lower level identities to each E1 line by matching
+    the line's E_low/E_up (within etol cm^-1, same J) to the eigenvector-
+    composition level table from parse_compositions(). This replaces the
+    transition table's own config/term labels (the OUTG11 line block labels are
+    derived from the block header, which is unreliable) with the dominant-
+    eigenvector identity — the same identity the RCE level fit is built on.
+
+    Returns the parse_outg11 line dicts, each augmented with:
+        config_low, term_id_low, config_up, term_id_up   (or None if unmatched)
+    Lines whose endpoints can't both be identified keep None and should be
+    dropped from gf comparisons rather than matched by wavelength.
+    """
+    comp = parse_compositions(path)
+    _, lines = parse_outg11(path)
+
+    def _Jstr(J):
+        try:
+            return "%g" % float(J)
+        except (ValueError, TypeError):
+            return None
+
+    def _find(E, J):
+        levs = comp.get(("e", _Jstr(J))) or []
+        levs = levs + (comp.get(("o", _Jstr(J))) or [])
+        best, bd = None, etol
+        for L in levs:
+            d = abs(L["E_calc"] - E)
+            if d <= bd:
+                bd, best = d, L
+        return best
+
+    for d in lines:
+        lo = _find(d["E_low"], d["J_low"])
+        up = _find(d["E_up"], d["J_up"])
+        d["config_low"] = lo["config"] if lo else None
+        d["term_id_low"] = lo["term"] if lo else None
+        d["config_up"] = up["config"] if up else None
+        d["term_id_up"] = up["term"] if up else None
+    return lines
+
+
 def parse_levels1(path):
     """Parse RCE's LEVELS1 output -> list of dicts with the OBSERVED and FITTED
     energies together:

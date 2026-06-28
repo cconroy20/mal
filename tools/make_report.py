@@ -614,53 +614,58 @@ def load_nist_lines(path):
     return out
 
 
-def _term_only(t):
-    """multiplicity+L from a term that may include a parent, e.g. '(2S) 3P'->'3P'."""
-    return _termkey(t)
+def _level_idkey(cfg, term, J):
+    """Normalized (config, term, J) level identity (same as match_levels)."""
+    return (_cfgkey(cfg), _termkey(term), _Jkey(J))
 
 
-def _linekey_unordered(t_a, J_a, t_b, J_b):
-    """Transition identity by the two levels' (term, J), order-independent."""
-    a = (_term_only(t_a), _Jkey(J_a))
-    b = (_term_only(t_b), _Jkey(J_b))
-    return tuple(sorted([a, b]))
+def _line_idkey(cfg_lo, t_lo, J_lo, cfg_up, t_up, J_up):
+    """Order-independent transition identity from both end-level identities."""
+    return tuple(sorted([_level_idkey(cfg_lo, t_lo, J_lo),
+                         _level_idkey(cfg_up, t_up, J_up)]))
 
 
-def _match_gf(comp_lines, nist_lines, tol=0.05):
-    """Match computed lines to NIST by (term-pair, J-pair) bucket, disambiguated
-    by closest wavelength within `tol`. Returns list of (loggf_comp, loggf_nist,
-    lambda)."""
+def match_gf_by_identity(outg11_path, nist_lines):
+    """Match computed E1 lines to NIST by the EIGENVECTOR-COMPOSITION identity of
+    BOTH end levels (config+term+J) -- the same robust identity the RCE level fit
+    is built on. This avoids the term-pair+nearest-wavelength matcher that
+    collides Rydberg series members (3p^2 1S vs 3s5s 1S) and invents residuals.
+    Returns list of (loggf_comp, loggf_nist, lambda_comp)."""
+    from parse_cowan import identify_lines
     buckets = {}
     for d in nist_lines:
-        k = _linekey_unordered(d["term_i"], d["J_i"], d["term_k"], d["J_k"])
+        k = _line_idkey(d["conf_i"], d["term_i"], d["J_i"],
+                        d["conf_k"], d["term_k"], d["J_k"])
         buckets.setdefault(k, []).append(d)
-    pairs = []
-    for d in comp_lines:
-        k = _linekey_unordered(d.get("term_low", "?"), d.get("J_low", "?"),
-                               d.get("term_up", "?"), d.get("J_up", "?"))
-        cands = buckets.get(k)
+    pairs, used = [], set()
+    for d in identify_lines(outg11_path):
+        if not (d["config_low"] and d["config_up"]):
+            continue
+        k = _line_idkey(d["config_low"], d["term_id_low"], d["J_low"],
+                        d["config_up"], d["term_id_up"], d["J_up"])
+        cands = [c for c in buckets.get(k, []) if id(c) not in used]
         if not cands:
             continue
-        lam = d["lambda_A"]
-        n = min(cands, key=lambda c: abs(c["lambda_A"] - lam))
-        if abs(n["lambda_A"] - lam) / lam > tol:
-            continue
-        pairs.append((d["loggf"], n["loggf"], lam))
+        n = min(cands, key=lambda c: abs(c["lambda_A"] - d["lambda_A"]))
+        used.add(id(n))
+        pairs.append((d["loggf"], n["loggf"], d["lambda_A"]))
     return pairs
 
 
-def page_gf(pdf, species, abinitio_lines, fitted_lines, nist_lines):
+def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines):
     """Single gf-comparison page overlaying ab initio (circles) and fitted
     (diamonds) against NIST, like the level-residual page. Left: 1:1 scatter
     (model vs NIST); right: residual (model - NIST) vs wavelength. Both panels
-    are fully boxed and share fixed ranges so the two series compare directly."""
+    are fully boxed and share fixed ranges so the two series compare directly.
+    Lines are matched to NIST by eigenvector-composition identity (see
+    match_gf_by_identity), not by term-pair + nearest wavelength."""
     series = []
-    if abinitio_lines:
+    if abinitio_path:
         series.append(("ab initio", "C0", "o",
-                       _match_gf(abinitio_lines, nist_lines)))
-    if fitted_lines:
+                       match_gf_by_identity(abinitio_path, nist_lines)))
+    if fitted_path:
         series.append(("fitted (RCE)", "C3", "D",
-                       _match_gf(fitted_lines, nist_lines)))
+                       match_gf_by_identity(fitted_path, nist_lines)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
     # fixed, shared ranges (independent of which series) for easy comparison
@@ -728,9 +733,8 @@ def main():
 
     nist_lines = (load_nist_lines(a.nist_lines)
                   if a.nist_lines and os.path.exists(a.nist_lines) else None)
-    fitted_lines = None
-    if a.gf_fitted and os.path.exists(a.gf_fitted):
-        _, fitted_lines = parse_outg11(a.gf_fitted)
+    fitted_path = (a.gf_fitted
+                   if a.gf_fitted and os.path.exists(a.gf_fitted) else None)
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
@@ -738,7 +742,7 @@ def main():
         page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist)
         page_residuals(pdf, a.species, matched, unified)
         if nist_lines:
-            page_gf(pdf, a.species, lines, fitted_lines, nist_lines)
+            page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines)
     nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "

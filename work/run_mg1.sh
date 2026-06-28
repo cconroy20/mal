@@ -31,10 +31,17 @@ echo "[3/6] RCG  (writes OUTGINE template, OUTG11 with ab initio levels+gf)"
 "$BIN/rcg"  < /dev/null > rcg_run.log  2>&1
 cp -f OUTG11 OUTG11.abinitio          # keep the pre-fit spectrum for comparison
 cp -f ING11  ING11.abinitio           # keep the ab initio parameter deck
+cp -f OUTGINE OUTGINE.abinitio        # pristine RCG param template (build reads this)
+
+# Optionally freeze under-constrained Rydberg integrals at their ab-initio value
+# so the energy fit can't drive them unphysical (which degrades gf). Set e.g.
+#   FREEZE='3s4d:G2,3s5p:G1' ./run_mg1.sh
+FREEZE_ARG=""
+[ -n "$FREEZE" ] && FREEZE_ARG="--freeze-params $FREEZE"
 
 echo "[4/6] build INE20 (substitute NIST observed levels, free parameters)"
-python3 "$ROOT/tools/build_ine20.py" --outgine OUTGINE --nist "$NIST" \
-    --outg11 OUTG11.abinitio --free-ci-pairs 1-6 --out INE20
+python3 "$ROOT/tools/build_ine20.py" --outgine OUTGINE.abinitio --nist "$NIST" \
+    --outg11 OUTG11.abinitio --free-ci-pairs 1-6 $FREEZE_ARG --out INE20
 cp -f INE20 OUTGINE                    # RCE reads the file named OUTGINE
 
 echo "[5/6] RCE  (semi-empirical least-squares fit)"
