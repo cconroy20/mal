@@ -3,7 +3,36 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
-## TL;DR
+## UPDATE: combined energy+gf fit works (Tier-2 prototype)
+
+Putting well-measured NIST gf into the objective alongside the energy levels
+FIXES the degradation below. RCE itself can't do this (it fits energies only,
+no transition data), so the fit is done by a Python optimizer wrapping RCG as a
+black-box forward model (RCG is ~8 ms/call for Mg I -> cost is a non-issue):
+trial radial params -> ING11 -> RCG -> parse levels+gf -> combined chi^2
+(energy term, cm^-1, offset-removed; + lambda * gf term, NIST-accuracy weighted,
+log gf >= -1 only). Tool: `tools/gf_fit.py` (+ `tools/ing11_params.py` for the
+ING11 read/write, round-trip byte-exact).
+
+Result (Mg I, seed = RCE-fitted ING11, lambda=1, Nelder-Mead), strong+A/B lines
+(log gf >= -1), verified independently via gf_table on the final OUTG11:
+
+    ab initio (RCG)        strong-gf RMS 0.114   level RMS  (unreferenced)
+    RCE energy-only fit    strong-gf RMS 0.165   level RMS ~1038 cm^-1
+    combined gf-fit        strong-gf RMS 0.071   level RMS    26.5 cm^-1
+
+The combined fit improves BOTH at once: gf RMS 0.071 (below the ab-initio floor
+of 0.114, and 57% better than energy-only RCE), AND levels to 26.5 cm^-1. The
+weak lines deliberately excluded from the objective (e.g. 3s4s 3S -> 3s5p 3P,
+NIST class C/D) are unchanged, as intended. This is the Tier-1.5/Tier-2 thesis
+demonstrated end to end on one ion: a gf-aware fit recovers gf accuracy the
+energy-only fit threw away. NEXT: tune lambda; add per-line gf MC uncertainties
+on top of this loop; try ridge-toward-ab-initio (--ridge) for ill-conditioned
+ions; carry to Fe II.
+
+---
+
+## TL;DR (original analysis that motivated the above)
 
 1. The report's old gf line-matcher was **wrong** — it bucketed by (term-pair,
    J-pair) and took the nearest wavelength within 5%. That collides Rydberg
