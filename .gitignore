@@ -14,3 +14,12 @@ cowan_nist/*.zip
 cowan_nist/extracted/**/*.exe
 cowan_nist/extracted/**/*.EXE
 cowan_nist/extracted/**/*.dll
+
+# LaTeX aux files (keep .tex source and .pdf output)
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz

@@ -1,0 +1,301 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+
+\newcommand{\Fk}{F^{k}}
+\newcommand{\Gk}{G^{k}}
+\newcommand{\Rk}{R^{k}}
+\newcommand{\znl}{\zeta_{n\ell}}
+\newcommand{\Eav}{E_{\mathrm{av}}}
+\newcommand{\prog}[1]{\textsc{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+% spectroscopic ion notation, e.g. \ion{Fe}{2} -> "Fe II"
+\newcommand{\ion}[2]{\mbox{#1\,\textsc{\romannumeral #2}}}
+
+\newtcolorbox{keybox}[1]{colback=blue!4,colframe=blue!40!black,title=#1,
+  fonttitle=\bfseries,boxrule=0.4pt}
+
+\title{\textbf{The Cowan Atomic-Structure Codes}\\[2pt]
+\large What \prog{rcn}, \prog{rcn2}, \prog{rcg}, \prog{rce} Actually Compute,
+from First Principles\\[6pt]
+\normalsize A working explainer for the Modern Atomic Linelists (\texttt{mal}) project}
+\author{C.\ Conroy \&\ Claude}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This document explains, from first principles, what the four Cowan programs do
+and how they chain together to produce atomic energy levels and oscillator
+strengths ($gf$-values) --- the data that go into stellar line lists. It maps the
+physics onto the \emph{actual} programs, input decks, and output files in this
+repository (\file{cowan\_nist/extracted/}). The goal is a shared, durable
+understanding of the engine we are modernizing, with particular attention to the
+least-squares fitting stage (\prog{rce}), which is the heart of the project. The
+canonical reference throughout is R.~D.\ Cowan, \emph{The Theory of Atomic
+Structure and Spectra} (Univ.\ California Press, 1981), cited as \textbf{TASS}.
+\end{abstract}
+
+\tableofcontents
+
+\section{The big picture: why these four programs exist}
+
+A stellar line list needs, for each transition, the lower and upper energy
+levels, the wavelength, and the oscillator strength $gf$. The wavelength is just
+the level difference; the levels and the $gf$ are the hard part. Computing them
+\emph{ab initio} for complex atoms (open $d$- and $f$-shells, the iron group) is
+not reliably accurate. Cowan's insight, embodied in these codes, is a
+\emph{semi-empirical} scheme: compute the atomic structure approximately from
+theory, then \emph{adjust a small number of physically meaningful radial
+parameters until the predicted levels match the experimentally measured ones}.
+The wavefunctions (eigenvectors) that result are far better than the purely
+theoretical ones, and the $gf$-values computed from them are correspondingly
+better.
+
+\begin{keybox}{The pipeline in one breath}
+\prog{rcn} solves for the radial wavefunctions and the \emph{radial integrals}
+($\Fk,\Gk,\znl,\dots$) of each electron configuration $\;\to\;$ \prog{rcn2}
+forms the configuration-interaction and electric-multipole (transition) radial
+integrals between configurations $\;\to\;$ \prog{rcg} builds the angular part,
+assembles and \emph{diagonalizes} the energy (Hamiltonian) matrix to get energy
+levels and eigenvectors, and from the eigenvectors computes $gf$-values
+$\;\to\;$ \prog{rce} re-runs the diagonalization inside a \emph{least-squares
+loop}, varying the radial parameters until the computed levels best fit the
+observed levels.
+\end{keybox}
+
+The division of labor reflects a deep structural fact about atomic Hamiltonians:
+the energy of a level separates into \textbf{radial} factors (integrals over the
+one-electron radial wavefunctions --- these are the $\Fk$, $\Gk$, $\znl$,
+$\Rk$) multiplied by \textbf{angular} factors (pure angular-momentum algebra,
+the same for any atom with a given configuration). \prog{rcn}/\prog{rcn2}
+compute the radial side; \prog{rcg} computes the angular side and combines them;
+\prog{rce} treats the radial numbers as adjustable.
+
+\section{The physics each stage implements}
+
+\subsection{The central-field starting point and \prog{rcn}}
+
+We seek the eigenstates of the non-relativistic many-electron Hamiltonian
+\begin{equation}
+H = \sum_{i}\left(-\tfrac{1}{2}\nabla_i^2 - \frac{Z}{r_i}\right)
+  + \sum_{i<j}\frac{1}{r_{ij}}
+  + \sum_i \xi(r_i)\,(\mathbf{l}_i\!\cdot\!\mathbf{s}_i),
+\label{eq:H}
+\end{equation}
+in atomic units, where the last term is the spin--orbit interaction. The
+\emph{central-field approximation} writes each electron's wavefunction as a
+product of a radial part $P_{n\ell}(r)/r$ and angular/spin parts. \prog{rcn}
+solves the resulting one-electron radial equations self-consistently for a
+\emph{single configuration} (e.g.\ $3d^7$, or $3d^6 4p$), using one of several
+approximations to Hartree--Fock; in practice the Hartree-plus-statistical-%
+exchange (HX) method or center-of-gravity HF is used, optionally with
+relativistic corrections (the ``HFR'' / ``HXR'' options --- important for the
+iron group and heavier).
+
+From the converged radial wavefunctions $P_{n\ell}(r)$, \prog{rcn} computes the
+\textbf{radial integrals} that parametrize the energy:
+\begin{align}
+\Fk(n\ell,n'\ell') &= \int\!\!\int P_{n\ell}^2(r_1)\,
+  \frac{r_<^{k}}{r_>^{k+1}}\,P_{n'\ell'}^2(r_2)\;dr_1\,dr_2
+  &&\text{(direct Slater integral)},\\
+\Gk(n\ell,n'\ell') &= \int\!\!\int P_{n\ell}(r_1)P_{n'\ell'}(r_1)\,
+  \frac{r_<^{k}}{r_>^{k+1}}\,P_{n\ell}(r_2)P_{n'\ell'}(r_2)\;dr_1\,dr_2
+  &&\text{(exchange Slater integral)},\\
+\znl &= \tfrac{\alpha^2}{2}\!\int P_{n\ell}^2(r)\,
+  \frac{1}{r}\frac{dV}{dr}\;dr
+  &&\text{(spin--orbit parameter)},
+\end{align}
+plus $\Eav$, the configuration's center-of-gravity energy. These few numbers
+per configuration are the \emph{radial parameters}. Everything semi-empirical
+happens by treating them as adjustable later (\S\ref{sec:rce}).
+
+\subsection{Configuration interaction and transition integrals: \prog{rcn2}}
+
+Real atomic states are not pure single configurations; nearby configurations of
+the same parity and $J$ \emph{mix} (configuration interaction, CI). \prog{rcn2}
+takes the radial wavefunctions from \prog{rcn} for \emph{several} configurations
+and computes:
+\begin{itemize}[nosep]
+\item the \textbf{CI Slater integrals} $\Rk$ (the $r_{ij}^{-1}$ matrix elements
+\emph{between} different configurations), which set the strength of the mixing;
+\item the \textbf{electric-multipole radial integrals}
+$\langle n\ell \,\|\, r \,\|\, n'\ell'\rangle$ (and higher multipoles), the
+radial part of the transition dipole moment --- the seed of every $gf$-value.
+\end{itemize}
+
+\subsection{Angular algebra, diagonalization, and where $gf$ comes from: \prog{rcg}}
+\label{sec:rcg}
+
+\prog{rcg} supplies the \emph{angular} half. Using angular-momentum
+(Racah/Wigner) algebra and tabulated coefficients of fractional parentage
+(the binary ``CFP decks'' \file{FOR072/073/074} that a freshly built \prog{rcg}
+generates once), it builds the Hamiltonian matrix in a chosen coupling basis.
+Schematically, every matrix element of \eqref{eq:H} is
+\begin{equation}
+\langle \gamma' \,|\, H \,|\, \gamma\rangle
+= \sum_{\text{integrals}}
+\underbrace{c_{\gamma'\gamma}^{(\cdot)}}_{\text{angular coeff.\ (\prog{rcg})}}
+\;\times\;
+\underbrace{\{\Eav,\Fk,\Gk,\znl,\Rk\}}_{\text{radial integrals (\prog{rcn}/\prog{rcn2})}} .
+\label{eq:matrixelement}
+\end{equation}
+\prog{rcg} then \textbf{diagonalizes} this matrix for each $J$. The eigenvalues
+are the predicted \textbf{energy levels}; the eigenvectors give the
+\textbf{composition} of each level (its percentage breakdown over basis states
+--- e.g.\ ``$72\%\;{}^5\!D + 18\%\;{}^3\!F + \dots$'').
+
+The oscillator strength follows from the eigenvectors. The line strength between
+levels $\beta J$ and $\beta' J'$ is
+\begin{equation}
+S = \left| \langle \beta J \,\|\, \mathbf{P}^{(1)} \,\|\, \beta' J'\rangle \right|^2 ,
+\qquad
+gf = \frac{8\pi^2 m_e c}{3 h}\,\frac{\sigma}{g}\,S \;\propto\; \sigma\, S,
+\end{equation}
+where $\sigma$ is the transition wavenumber and the reduced matrix element of
+the dipole operator $\mathbf{P}^{(1)}$ is a sum over the
+\prog{rcn2} transition radial integrals weighted by \emph{both} levels'
+eigenvector components. This is the crucial coupling that drives the whole
+project: \textbf{many lines' $gf$-values depend on the same few radial
+parameters through the shared eigenvectors.} A small change in the fit
+redistributes oscillator strength among coupled lines.
+
+\subsection{The semi-empirical least-squares fit: \prog{rce}}
+\label{sec:rce}
+
+This is the stage we are modernizing, so we treat it carefully. \prog{rcg}'s
+predicted levels are only as good as the theoretical radial integrals --- and
+those are systematically off (Hartree--Fock overestimates the Slater integrals
+by $\sim$10--20\%). \prog{rce} fixes this empirically. Its job (TASS \S16-3 to
+16-5):
+
+\begin{enumerate}[nosep]
+\item Treat the radial parameters $\mathbf{x}=\{\Eav,\Fk,\Gk,\znl,\Rk,\dots\}$
+as \emph{free}. The angular coefficients in \eqref{eq:matrixelement} are fixed
+(precomputed by \prog{rcg} and passed in the binary file \file{TAPE2E}).
+\item For trial $\mathbf{x}$, build and diagonalize the energy matrix for each
+$J$ to get computed levels $E_i^{\mathrm{calc}}(\mathbf{x})$.
+\item Minimize the weighted least-squares residual against the
+\emph{experimentally observed} levels $E_i^{\mathrm{obs}}$ (from NIST/lab),
+\begin{equation}
+\chi^2(\mathbf{x}) = \sum_i w_i \left[
+E_i^{\mathrm{calc}}(\mathbf{x}) - E_i^{\mathrm{obs}} \right]^2 ,
+\label{eq:chi2}
+\end{equation}
+iterating (Newton/Levenberg-style) until the parameters stop changing
+(by $<0.03$ between cycles) or a cycle cap is hit. Parameters can be held fixed,
+or tied in fixed ratios (a group forced to scale together).
+\item Feed the \emph{fitted} $\mathbf{x}$ back through the diagonalization to get
+the \emph{improved} eigenvectors --- and hence the improved $gf$-values
+(via \prog{rcg}).
+\end{enumerate}
+
+\begin{keybox}{Why this is ``black magic'' --- and our opportunity}
+The fit in \eqref{eq:chi2} is ill-conditioned: parameters are correlated, the
+problem is non-linear, and which configurations to include and which parameters
+to free/fix/tie is a matter of hand-tuned judgment with ``no strict
+methodology.'' This is the only non-automated stage, takes hours to weeks per
+ion, and has scarcely changed in 50 years. It is exactly where modern
+techniques --- regularization, Bayesian inference with priors, MCMC for
+\emph{per-line $gf$ uncertainties}, global optimization, and (our novel idea)
+folding the observed \emph{stellar spectrum} into the objective alongside the
+energy levels --- can make a genuine advance. See the project plan.
+\end{keybox}
+
+\section{Mapping to the actual code and files}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llp{7.4cm}@{}}
+\toprule
+Program & Source (\file{for/}) & Computes \\
+\midrule
+\prog{rcn}  & \file{RCN36K.F} & Single-config.\ radial wavefns $P_{n\ell}(r)$;
+  radial integrals $\Eav,\Fk,\Gk,\znl$ \\
+\prog{rcn2} & \file{RCN2K.F}  & CI integrals $\Rk$; multipole transition
+  integrals $\langle r\rangle$ \\
+\prog{rcg}  & \file{rcg11k.f} & Angular coeffs (CFP); builds \& diagonalizes
+  $H$ $\to$ levels, eigenvectors, $gf$ \\
+\prog{rce}  & \file{RCE20K.F} & Least-squares fit of radial parameters to
+  observed levels; improved eigenvectors $\to$ $gf$ \\
+\bottomrule
+\end{tabular}
+\caption{The four programs and what they compute. Built by
+\file{build/build.sh}.}
+\end{table}
+
+\paragraph{Data flow between programs.} Each program writes the input for the
+next, mostly through fixed-name files (a legacy of the punched-card/tape era):
+\begin{itemize}[nosep]
+\item \prog{rcg} consumes the binary CFP decks \file{FOR072/073/074} (generated
+once by \file{build/make\_cfp.sh}) and writes, among others, \file{TAPE2E}
+(binary coefficient matrices for \prog{rce}) and \file{OUTGINE} (a starter for
+\prog{rce}'s text input).
+\item \prog{rce} reads \file{TAPE2E} plus a text deck \file{INE20} (control
+info + the \emph{observed} levels --- the only thing not produced upstream) and
+writes \file{LEVELS1/2/3} (fitted levels and eigenvectors) and \file{PARVALS}
+(fitted parameter values, for restarting).
+\end{itemize}
+
+\paragraph{An actual input deck.} The example \file{work/IN36} is an \prog{rcn}
+input for \ion{Sn}{7+} (\file{IN36.ai} is \ion{B}{3+} with a long Rydberg
+series). The first line is a fixed-column ``control card'' (mesh, method flags,
+convergence tolerances, relativistic/correlation switches); each subsequent line
+names one configuration. For \ion{Sn}{7+}:
+\begin{verbatim}
+200-90 0 2  01.  4.0    5.E-08    1.E-11-2 00090 0 1.0  0.65  0.0 1.00   -6
+   50    8Sn7+  4d7              4p6  4D7
+   50    8Sn7+  4d65p            4p6  4D6  5P
+   -1
+\end{verbatim}
+Here the two configurations $4d^7$ and $4d^6 5p$ (opposite parity --- the source
+and upper levels of E1 transitions) are listed, terminated by \texttt{-1}. The
+columns of this card are documented in \file{cowan\_nist/extracted/RCN\_DOC.txt};
+we will annotate them in detail when we drive a real run.
+
+\section{What ``running it'' looks like end to end}
+
+For a single ion and one parity pair, the canonical chain is
+\[
+\prog{rcn} \to \prog{rcn2} \to \prog{rcg} \to \prog{rce} \to \prog{rcg}
+\]
+(the final \prog{rcg} re-run applies the fitted parameters to emit final levels
+and $gf$). The seven coupling schemes \prog{rcg}/\prog{rce} support
+(LS, JJ, intermediate, \dots) only change the basis, not the physics; final
+eigenvectors are reported in LS or JJ for interpretation.
+
+\begin{keybox}{Next steps in the project}
+\begin{enumerate}[nosep]
+\item Drive the shipped example (\file{IN36}) through the full chain and read
+each output file together, annotating the real column formats.
+\item Reproduce a known Kurucz \ion{Fe}{2} $gf$ via the standard chain (validate
+we replicate the legacy result).
+\item Replace the \prog{rce} fit \eqref{eq:chi2} with a modern regularized /
+Bayesian fit, attach per-line $gf$ uncertainties, and (Tier~2) fold in the
+solar spectrum.
+\end{enumerate}
+\end{keybox}
+
+\section*{References}
+\begin{itemize}[nosep]
+\item R.~D.\ Cowan, \emph{The Theory of Atomic Structure and Spectra}
+(Univ.\ California Press, 1981). [TASS]
+\item Program documentation shipped with the code:
+\file{RCN\_DOC.txt}, \file{RCG\_DOC.txt}, \file{RCE\_DOC.txt}
+(in \file{cowan\_nist/extracted/}).
+\item A.\ Kramida, ``Cowan Code: 50 Years of Growing Impact on Atomic Physics,''
+\emph{Atoms} \textbf{7}, 64 (2019).
+\end{itemize}
+
+\end{document}
