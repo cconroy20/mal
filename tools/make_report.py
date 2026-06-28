@@ -614,6 +614,39 @@ def load_nist_lines(path):
     return out
 
 
+def load_kurucz_lines(path, elem_code=None):
+    """Read Bob Kurucz's per-ion GF line file (gf<xxyy>.pos / .lines / .all), the
+    documented 160-column format. These are his SEMI-EMPIRICAL computed log gf
+    (the K<yy> code marks the calc year). Returns dicts with the same keys as
+    load_nist_lines (conf/term/J for both ends) so the identity matcher reuses
+    them. Wavelengths are air (nm) above 200 nm; we keep loggf + identities only
+    (matching is by level identity, not wavelength). elem_code (e.g. 12.00 for
+    Mg I) filters to one species when a file mixes them."""
+    out = []
+    with open(path, errors="replace") as f:
+        for ln in f:
+            if len(ln) < 80:
+                continue
+            try:
+                wl_nm = float(ln[0:11])
+                loggf = float(ln[11:18])
+                elem = float(ln[18:24])
+                if elem_code is not None and abs(elem - elem_code) > 1e-3:
+                    continue
+                lab_lo = ln[42:52].strip().split()
+                lab_up = ln[70:80].strip().split()
+                if len(lab_lo) < 2 or len(lab_up) < 2:
+                    continue
+                out.append({
+                    "loggf": loggf, "lambda_A": wl_nm * 10.0,  # nm -> Angstrom
+                    "conf_i": lab_lo[0], "term_i": lab_lo[1], "J_i": ln[36:41],
+                    "conf_k": lab_up[0], "term_k": lab_up[1], "J_k": ln[64:69],
+                })
+            except ValueError:
+                continue
+    return out
+
+
 def _level_idkey(cfg, term, J):
     """Normalized (config, term, J) level identity (same as match_levels)."""
     return (_cfgkey(cfg), _termkey(term), _Jkey(J))
@@ -652,8 +685,36 @@ def match_gf_by_identity(outg11_path, nist_lines):
     return pairs
 
 
+def match_kurucz_gf(kurucz_lines, nist_lines, tol=0.01):
+    """Match Bob Kurucz's per-ion gf lines to NIST by both-end level identity
+    (config+term+J) AND nearest wavelength (within `tol` fractional), so that
+    different Rydberg members sharing a reduced (config,term) key are not
+    confused (his full series produces many lines per identity bucket). Kurucz
+    wl is air; NIST cache is vacuum -- the ~1e-4 air/vac shift is well inside a
+    1% tolerance and disambiguation only needs the nearest. Returns
+    (loggf_kurucz, loggf_nist, loggf_nist) triples (3rd = residual-panel x)."""
+    buckets = {}
+    for d in nist_lines:
+        k = _line_idkey(d["conf_i"], d["term_i"], d["J_i"],
+                        d["conf_k"], d["term_k"], d["J_k"])
+        buckets.setdefault(k, []).append(d)
+    pairs, used = [], set()
+    for d in kurucz_lines:
+        k = _line_idkey(d["conf_i"], d["term_i"], d["J_i"],
+                        d["conf_k"], d["term_k"], d["J_k"])
+        cands = [c for c in buckets.get(k, []) if id(c) not in used]
+        if not cands:
+            continue
+        n = min(cands, key=lambda c: abs(c["lambda_A"] - d["lambda_A"]))
+        if abs(n["lambda_A"] - d["lambda_A"]) / n["lambda_A"] > tol:
+            continue
+        used.add(id(n))
+        pairs.append((d["loggf"], n["loggf"], n["loggf"]))
+    return pairs
+
+
 def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
-            gf_fitted_label="fitted (RCE)"):
+            gf_fitted_label="fitted (RCE)", kurucz_lines=None):
     """Single gf-comparison page overlaying ab initio (circles) and fitted
     (diamonds) against NIST, like the level-residual page. Left: 1:1 scatter
     (model vs NIST); right: residual (model - NIST) vs wavelength. Both panels
@@ -667,6 +728,9 @@ def page_gf(pdf, species, abinitio_path, fitted_path, nist_lines,
     if fitted_path:
         series.append((gf_fitted_label, "C3", "D",
                        match_gf_by_identity(fitted_path, nist_lines)))
+    if kurucz_lines:
+        series.append(("Kurucz (gfall)", "C2", "s",
+                       match_kurucz_gf(kurucz_lines, nist_lines)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
     # data-driven log gf range (both model and NIST values, both series) with a
@@ -736,6 +800,11 @@ def main():
                     help="legend label for the fitted-gf series on the gf page.")
     ap.add_argument("--nist-lines", default=None,
                     help="cached NIST lines table (reference log gf).")
+    ap.add_argument("--kurucz-lines", default=None,
+                    help="Bob Kurucz's per-ion GF line file (gf<xxyy>.pos/.all); "
+                         "his fitted gf, added to the gf page as a 3rd series.")
+    ap.add_argument("--kurucz-elem", type=float, default=None,
+                    help="element code to filter Kurucz lines (e.g. 12.00 Mg I).")
     ap.add_argument("--fit-rms", type=float, default=None)
     a = ap.parse_args()
 
@@ -755,6 +824,9 @@ def main():
                   if a.nist_lines and os.path.exists(a.nist_lines) else None)
     fitted_path = (a.gf_fitted
                    if a.gf_fitted and os.path.exists(a.gf_fitted) else None)
+    kurucz_lines = (load_kurucz_lines(a.kurucz_lines, a.kurucz_elem)
+                    if a.kurucz_lines and os.path.exists(a.kurucz_lines)
+                    else None)
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
@@ -763,7 +835,7 @@ def main():
         page_residuals(pdf, a.species, matched, unified)
         if nist_lines:
             page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines,
-                    gf_fitted_label=a.gf_fitted_label)
+                    gf_fitted_label=a.gf_fitted_label, kurucz_lines=kurucz_lines)
     nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "
