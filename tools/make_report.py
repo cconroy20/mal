@@ -39,7 +39,7 @@ from parse_cowan import parse_outg11, parse_levels1  # noqa: E402
 
 plt.rcParams.update({
     "font.size": 10, "axes.linewidth": 0.8,
-    "axes.spines.top": False, "axes.spines.right": False,
+    # keep all four spines: every plot is fully boxed by axes
 })
 
 
@@ -598,21 +598,15 @@ def _linekey_unordered(t_a, J_a, t_b, J_b):
     return tuple(sorted([a, b]))
 
 
-def page_gf(pdf, species, comp_lines, nist_lines, solid_label="computed"):
-    """Compare computed log gf to NIST log gf for matched transitions.
-    A transition's (term,J) pair is NOT unique across a Rydberg series, so we
-    match within same-(term-pair, J-pair) candidates by CLOSEST wavelength, and
-    only accept matches within a tolerance (computed/fitted wavelengths are near
-    the observed ones). This avoids cross-series mismatches.
-    Left: 1:1 scatter; right: residual vs wavelength."""
-    # bucket NIST lines by (termpair, Jpair)
+def _match_gf(comp_lines, nist_lines, tol=0.05):
+    """Match computed lines to NIST by (term-pair, J-pair) bucket, disambiguated
+    by closest wavelength within `tol`. Returns list of (loggf_comp, loggf_nist,
+    lambda)."""
     buckets = {}
     for d in nist_lines:
         k = _linekey_unordered(d["term_i"], d["J_i"], d["term_k"], d["J_k"])
         buckets.setdefault(k, []).append(d)
-
-    TOL = 0.05   # fractional wavelength tolerance for accepting a match
-    pairs = []   # (loggf_comp, loggf_nist, lambda, acc)
+    pairs = []
     for d in comp_lines:
         k = _linekey_unordered(d.get("term_low", "?"), d.get("J_low", "?"),
                                d.get("term_up", "?"), d.get("J_up", "?"))
@@ -621,27 +615,54 @@ def page_gf(pdf, species, comp_lines, nist_lines, solid_label="computed"):
             continue
         lam = d["lambda_A"]
         n = min(cands, key=lambda c: abs(c["lambda_A"] - lam))
-        if abs(n["lambda_A"] - lam) / lam > TOL:
-            continue                       # nearest candidate too far -> no match
-        pairs.append((d["loggf"], n["loggf"], lam, n["acc"]))
+        if abs(n["lambda_A"] - lam) / lam > tol:
+            continue
+        pairs.append((d["loggf"], n["loggf"], lam))
+    return pairs
+
+
+def page_gf(pdf, species, abinitio_lines, fitted_lines, nist_lines):
+    """Single gf-comparison page overlaying ab initio (circles) and fitted
+    (diamonds) against NIST, like the level-residual page. Left: 1:1 scatter
+    (model vs NIST); right: residual (model - NIST) vs wavelength. Both panels
+    are fully boxed and share fixed ranges so the two series compare directly."""
+    series = []
+    if abinitio_lines:
+        series.append(("ab initio", "C0", "o",
+                       _match_gf(abinitio_lines, nist_lines)))
+    if fitted_lines:
+        series.append(("fitted (RCE)", "C3", "D",
+                       _match_gf(fitted_lines, nist_lines)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
-    if pairs:
+    # fixed, shared ranges (independent of which series) for easy comparison
+    a1.plot([-8, 1], [-8, 1], color="0.6", lw=0.8, ls="--", zorder=1)
+    title_bits = []
+    for label, col, mk, pairs in series:
+        if not pairs:
+            continue
         c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
-        a1.plot([-8, 1], [-8, 1], color="0.6", lw=0.8, ls="--")
-        a1.scatter(nlg, c, s=26, color="C0", zorder=3)
-        a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel(f"{solid_label} $\\log gf$")
-        a1.set_title(f"{species}: {len(pairs)} matched lines", fontsize=10)
-        d = c - nlg
-        a2.axhline(0, color="k", lw=0.6)
-        a2.scatter([p[2] for p in pairs], d, s=26, color="C0")
-        a2.set_xlabel("Wavelength (Å)")
-        a2.set_ylabel(f"$\\Delta\\log gf$ ({solid_label} $-$ NIST)")
-        a2.set_title(f"RMS $\\Delta\\log gf$ = {np.sqrt(np.mean(d**2)):.2f}",
-                     fontsize=10)
-    else:
-        a1.text(0.5, 0.5, "no matched lines", ha="center")
-    fig.suptitle(f"{species}: gf comparison ({solid_label} vs NIST)",
+        lam = np.array([p[2] for p in pairs])
+        a1.scatter(nlg, c, s=28, facecolors="none" if mk == "o" else col,
+                   edgecolors=col, marker=mk, zorder=3, label=label)
+        a2.scatter(lam, c - nlg, s=28, facecolors="none" if mk == "o" else col,
+                   edgecolors=col, marker=mk, zorder=3, label=label)
+        title_bits.append(f"{label} RMS={np.sqrt(np.mean((c-nlg)**2)):.2f}")
+
+    a1.set_xlim(-8, 1); a1.set_ylim(-8, 1)
+    a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel("model $\\log gf$")
+    a1.set_title("1:1 comparison", fontsize=10)
+    a1.legend(frameon=False, fontsize=9, loc="upper left")
+
+    a2.axhline(0, color="k", lw=0.6)
+    a2.set_ylim(-1.0, 1.0)
+    a2.set_xlabel("Wavelength (Å)")
+    a2.set_ylabel("$\\Delta\\log gf$ (model $-$ NIST)")
+    a2.set_title("residuals", fontsize=10)
+    a2.legend(frameon=False, fontsize=9, loc="upper right")
+
+    fig.suptitle(f"{species}: gf comparison vs NIST   "
+                 + ("(" + ", ".join(title_bits) + " dex)" if title_bits else ""),
                  fontsize=12, y=0.99)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     pdf.savefig(fig); plt.close(fig)
@@ -689,9 +710,7 @@ def main():
         page_levels(pdf, a.species, matched, fitted, calc, ie_cm)
         page_residuals(pdf, a.species, matched, unified)
         if nist_lines:
-            page_gf(pdf, a.species, lines, nist_lines, "ab initio")
-            if fitted_lines:
-                page_gf(pdf, a.species, fitted_lines, nist_lines, "fitted (RCE)")
+            page_gf(pdf, a.species, lines, fitted_lines, nist_lines)
     nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "
