@@ -1,0 +1,51 @@
+outg11                       ;Transitions file name (RCG output)
+rceout                       ;RCE vector output file name
+tr.ab                        ;Reduced linelist file name (to create)
+0.5                          ;Min. scaled intensity to include in TRANS.DAT
+10000000                     ;Max. energy of levels to include in TRANS.DAT
+2                            ;Number of spectral ranges for intensity scaling
+     0.0         ;(Angstroms)  Wavelength range start
+     150.0       ;(Angstroms)  Wavelength range end
+     5000        ;Intensity scale in TRANS.DAT for this range
+     Y           ;Absorption spectrum? [Y/N]
+   20000.0         ;(cm-1) Eff.temperature for Boltzman scaling (0 -no scaling)
+          150.1  ;(Angstroms)  Wavelength range start
+          6000.0 ;(Angstroms) Wavelength range end
+          10000  ;Intensity scale in TRANS.DAT for this range
+          N      ;Absorption spectrum? [Y/N]
+          0.0    ;(cm-1) Eff.temperature for Boltzman scaling (0 -no scaling)
+N                ;Y or N - to scale metastables gA up or not
+     1e-7        ;Min. lifetime to treat level as metastable
+     100.0       ;Factor to increase gA for metastable levels
+50.0       ;(cm-1) Min. term splitting (0 -no term merging)
+1          ;Configurations naming: 0 - use conf.numbers, 1 - use conf. names
+10.0       ;(cm-1)               Uncertainty for exp. levels in ENLEV.DAT
+3000.0     ;(cm-1)               Uncertainty for theor. levels in ENLEV.DAT
+N          ;Remove unconnected levels? [Y/N]
+el1        ;Conf-J-E sorted output levels file name
+N          ;Paint matching lines from DLV.DAT? [Y/N]
+     0.1   ;Assignment threshold of intensity ratio for multiple assignments
+5000.0     ;Min. wavenumber to be converted to air wavelength
+50000.0    ;Max. wavenumber to be converted to air wavelength
+Y          ;Write output in tab-delimited format
+;---------------------------------------------------------------------------
+; Comments:
+;
+; See file CONV_OUT.HLP for the description of the CONV_OUT program.
+; 
+; Each entry can be followed by an arbitrary number of spaces followed by a
+; semicolon (;) and any comments text after it. The semicolon must be present 
+; on each line: don't delete it.
+;
+; Min. scaled intensity: keep in mind that the output intensities are 
+; rounded to a whole number. So, 0.5 will be rounded to unity, and values
+; less than 0.5 will be rounded to zero.
+;
+; At least one spectral range must be specified. If more than one range is
+; specified, you should include the five description lines for each 
+; spectral range. Use indents to make the groups of entries look separately.
+;
+; Intensity scale must be integer.
+;
+; Min./Max. wavenumbers for air: if a wavenumber of a line is not between 
+; the 'Min.' and 'Max.', its wavelength is given in vacuum, otherwise - in air.

@@ -1,0 +1,116 @@
+     Program Conv_Out is used for conversion of the RCG and RCE 
+output files into the IDEN input files TRANS.DAT and ENLEV.DAT.
+
+Besides it, this program creates reduced linelist, sorted by line wavelengths.
+
+All input parameters needed for the CONV_OUT program must be specified
+in the parameter file named CONV_OUT.PAR. It must be in the current directory
+when you run CONV_OUT. Copy the sample CONV_OUT.PAR to your working directory
+and modify it as you need. The sample file contains description of its format
+inside. All comments written in the parameter file must start from semicolon.
+
+What the CONV_OUT program does:
+
+    - Reads the parameter file CONV_OUT.PAR;
+
+    - Reads the RCEOUT vector-output file created by RCE ver. 20k;
+    - Reads the OUTG11 file created by RCG ver. 11;
+
+    CAUTION: RCE and RCG should be ran with the same
+    radial parameters (RCE - with zero number of iterations,
+    just after the RCG, or RCG with ALL parameters taken from the
+    last iteration of RCE), to get the most close eigenvalues and
+    eigenvectors. RCG should be ran so that OUTG11 contains transition
+    list sorted by energy levels (of first and/or second parity). This
+    is provided by setting the print mode parameter ISPECC (column 72 in
+    the ING11 file) to 1,2,3,5 or 6; 
+
+      The CONV_OUT program 
+      - reads eigenvalues and eigenvectors from the OUTG11 file, identifies 
+        them with those read from the RCEOUT file, 
+      - substitutes the experimental level energies (where available) instead 
+        of the calculated, 
+      - reads transitions data from the OUTG11 file, 
+      - calculates the level lifetimes by summing all transition rates down 
+        from each level,
+      - finds the maximum gA for each of the spectral ranges specified in
+        the parameter file and scales the line intensities so that for each
+        range the maximum line intensity is equal to the value specified in 
+        the parameter file; scaling can be done linearly or it can include
+        the Boltzman factor for the level pupulation; absorption spectra 
+        can be modelled too - in this case only the transitions originating 
+        from the ground state or from the levels connected with the ground
+        state by resonance lines will be included in the output.
+
+    - Reduces the line list, leaving alive only transitions
+      that are more intense than given threshold value;
+      this line list will be wavelength-sorted. Transition probabilities
+      are printed as gA*Scale/gAmax, where the Scale factor is given
+      in the parameter file for each given spectral range.
+
+    - In this "reduced linelist", you can artificially increase
+      intensities of lines arising down from metastable levels by
+      some factor - to make some account for the rise of their population; 
+      you should indicate explicitly, which levels should be treated as 
+      metastable. For that, specify (in the parameter file) the minimum level 
+      lifetime to treat the level as metastable. If any level has longer 
+      lifetime than this minimum value, it will be treated as metastable: 
+      the intensities of all lines arising down from it will be multiplied by 
+      a factor indicated in the parameter file. If this factor is <= 1, this 
+      option does not work. These scaled lines are written also to 
+      a separate file named "META.", as well as the list of metastable
+      levels.
+
+    - Converts the "reduced linelist" to the files ENLEV.DAT and TRANS.DAT 
+      for the V.Azarov's IDEN program. You can remove the levels which are 
+      not connected with others by any transition, reducing the total number 
+      of levels. In the ENLEV.DAT file, the levels are labelled by a name
+      of the component having maximum percentage in its composition. The
+      name itself consists of a term name (5 places, i.e. '2P3D1', or 8 
+      places, i.e. '(2P) 3D1', where '2P' is a parent term and '3D1' is a 
+      final term), configuration name (5 places; spaces are deleted) or 
+      reference number (as listed in OUTG11 file), and a parity symbol
+      ('_' for the first parity and '~' for the second parity).
+
+    - If the 'DLV.DAT' file is available, the program can assign the lines
+      to the transitions between the experimental energy levels (if any),
+      if the 'Paint' option is specified in the parameter file. In this 
+      case, the NUMSET.DAT file must be present in the current directory
+      along with the DLV.DAT file (line uncertainties are read from it). A 
+      line is assigned to a transition if the line's wavenumber fits to the
+      difference of the upper and lower energies of the transition within the
+      experimental uncertainty derived from the wavelength uncertainty 
+      given in the NUMSET.DAT file. If a line can have multiple assignments,
+      the most intense transition is assigned first; the others are 
+      assigned, too, only if their intensity ratio to the first assigned
+      (most intense) transition is greater or equal to the 'assignment
+      threshold' specified in the parameter file.
+
+    - Creates (by your will) the energy levels file sorted in a special
+      way named CONF-J-E. All levels are first divided into groups by 
+      configuration names. Each group is divided into sub-groups with 
+      the same J. Then each of these sub-groups is sorted by level energies. 
+         This file can be needed if you are upgrading your COWAN calculations
+      using newly attained experimental levels data. After "improved"
+      calculations, many levels will change designations, and their 
+      energy order will differ from what you started from. But your 
+      old ENLEV.DAT and TRANS.DAT still contains many identifications
+      that you have made to get the new levels data. Not to loose this
+      work, you may transfer these identifications to the new ENLEV.DAT
+      and TRANS.DAT. But for this, you must install the correspondence
+      between the level numbers in old ENLEV.DAT and new ENLEV.DAT. 
+      The CONF-J-E sorted file will help you to do it. You should also
+      have the CONF-J-E sorted file produced from the old ENLEV.DAT file,
+      and bring the two files together, new data in the left column and
+      old data in the right column. The separate program FINDDIFF checks
+      this combined file, making the list of lines having differences in
+      level notations. This list usually is not very long, and you can 
+      work through it, replacing halves of lines so that in every line the 
+      left half and the right half contain the same electron state.
+      After that, the program MTRANS1 can produce the combined file 
+      TRANS.DAT containing all old identifications but newly calculated 
+      levels and transition probabilities.
+
+
+                                           A.E.Kramida,
+                                           October 5, 1995                                
