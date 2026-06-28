@@ -217,22 +217,32 @@ def _group_terms(matched):
     return panels
 
 
-def _grotrian_page(pdf, species, panels, efield, solid_label, title):
-    """Draw one Grotrian term diagram. `efield` selects the solid-line energy
-    key on each level ('E_calc' for ab initio, 'E_fit' for the RCE fit); NIST
-    observed ('E_obs') is always the dashed overlay."""
-    even = [p for p in panels if p["par"] == "e"]
-    odd = [p for p in panels if p["par"] == "o"]
-    even.sort(key=_term_sort_key); odd.sort(key=_term_sort_key)
-
-    layout = []   # (panel, x)
+def _grotrian_layout(panels):
+    """Fixed left-to-right column assignment: even-parity block, gap, odd-parity
+    block, each ordered by energy. Returned so multiple pages share it exactly."""
+    even = sorted([p for p in panels if p["par"] == "e"], key=_term_sort_key)
+    odd = sorted([p for p in panels if p["par"] == "o"], key=_term_sort_key)
+    layout = []
     x = 0
     for p in even:
         layout.append((p, x)); x += 1
-    x += 1        # gap between parity blocks
+    x += 1
     for p in odd:
         layout.append((p, x)); x += 1
-    nx = max(1, x)
+    return layout
+
+
+def _grotrian_page(pdf, species, panels, efield, solid_label, title,
+                   layout=None, ylim=None):
+    """Draw one Grotrian term diagram. `efield` selects the solid-line energy
+    key on each level ('E_calc' for ab initio, 'E_fit' for the RCE fit); NIST
+    observed ('E_obs') is always the dashed overlay. `layout` (from
+    _grotrian_layout) fixes the x-columns so before/after pages align exactly."""
+    if layout is None:
+        layout = _grotrian_layout(panels)
+    even = [p for p in panels if p["par"] == "e"]
+    odd = [p for p in panels if p["par"] == "o"]
+    nx = max(1, (max(xc for _, xc in layout) + 1) if layout else 1)
 
     fig, ax = plt.subplots(figsize=(max(7.0, 0.9 * nx + 2), 9.0))
     fig.suptitle(f"{species}: {title}", fontsize=14, y=0.97)
@@ -265,6 +275,8 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title):
                 ha="center", va="bottom", fontsize=9, style="italic")
 
     ax.set_xlim(-0.8, nx - 0.2)
+    if ylim is not None:
+        ax.set_ylim(ylim)
     ax.set_ylabel("Energy (cm$^{-1}$)")
 
     from matplotlib.lines import Line2D
@@ -307,60 +319,94 @@ def _group_fitted(fitted):
     return panels
 
 
-def page_levels(pdf, species, matched, fitted_panels=None):
-    """Centerpiece. Page 1: ab initio + NIST.  Page 2 (if fitted data supplied):
-    RCE-fitted + NIST.  Then the companion fine-structure table."""
-    panels = _group_terms(matched)
-    _grotrian_page(pdf, species, panels, "E_calc",
-                   "computed (ab initio)", "term diagram - ab initio vs observed")
-    if fitted_panels is not None:
-        _grotrian_page(pdf, species, fitted_panels, "E_fit",
-                       "fitted (RCE)", "term diagram - fitted vs observed")
-    _page_level_table(pdf, species, panels, fitted_panels)
+def _attach_abinitio(calc, fitted):
+    """Attach E_calc (ab initio) to each fitted level. OUTG11's config labels are
+    unreliable under CI, but within each (parity, J) the ab initio eigenvalues
+    and the fitted levels are the SAME states in the same energy order. So we
+    match by energy rank within (parity, J). Returns the fitted list with an
+    'E_calc' key added (None if no ab initio available)."""
+    from collections import defaultdict
+    ab = defaultdict(list)
+    for c in calc:
+        ab[(c["parity"], str(float(c["J"])))].append(c["E_calc"])
+    for k in ab:
+        ab[k].sort()
+    # group fitted by (parity, J), sort by E_fit, pair with sorted ab initio
+    fb = defaultdict(list)
+    for m in fitted:
+        fb[(m["parity"], str(float(m["J"])))].append(m)
+    for k, lev in fb.items():
+        lev.sort(key=lambda x: x["E_fit"])
+        cand = ab.get(k, [])
+        for i, m in enumerate(lev):
+            m["E_calc"] = cand[i] if i < len(cand) else None
+    return fitted
 
 
-def _page_level_table(pdf, species, panels, fitted_panels=None):
-    """Tabulate every level. Without a fit: config/term/J/E_calc/E_obs/ΔE.
-    With a fit: config/term/J/E_obs/E_calc/Δ(ab initio)/E_fit/Δ(fit), so the
-    improvement is visible per level."""
-    # index fitted by (cfg, term, J) for merging
-    fit_idx = {}
-    if fitted_panels:
-        for p in fitted_panels:
+def build_unified_panels(calc, fitted):
+    """One authoritative level list (from LEVELS1) carrying E_calc/E_obs/E_fit,
+    grouped into term panels. Both Grotrian pages and the table use THIS, so the
+    before/after layouts are identical."""
+    fitted = _attach_abinitio(calc, _dedup_levels1(fitted))
+    groups = {}
+    for m in fitted:
+        key = (_cfgkey(m["config"]), _termkey(m["term"]), m["parity"])
+        groups.setdefault(key, []).append(m)
+    panels = []
+    for (cfg, tk, par), lev in groups.items():
+        Es = [x["E_fit"] for x in lev] + \
+             [x["E_obs"] for x in lev if x["E_obs"] is not None]
+        panels.append({"cfg": cfg, "tk": tk, "par": par, "lev": lev,
+                       "E_mean": np.mean(Es) if Es else 0.0})
+    panels.sort(key=_term_sort_key)
+    return panels
+
+
+def _dedup_levels1(fitted):
+    seen = set(); uniq = []
+    for m in fitted:
+        key = (_cfgkey(m["config"]), _termkey(m["term"]), str(float(m["J"])),
+               round(m["E_fit"], 1))
+        if key in seen:
+            continue
+        seen.add(key); uniq.append(m)
+    return uniq
+
+
+def page_levels(pdf, species, matched, fitted=None, calc=None):
+    """Centerpiece. When fitted data exist, both Grotrian pages share ONE panel
+    set and ONE x-layout so paging gives a clean before/after:
+      Page 1: ab initio (solid) + NIST (dashed)
+      Page 2: fitted RCE (solid) + NIST (dashed)
+    Then the merged level table. Without a fit, falls back to the ab-initio-only
+    diagram from `matched`."""
+    if fitted:
+        panels = build_unified_panels(calc or [], fitted)
+        layout = _grotrian_layout(panels)
+        # shared y-range across both pages so paging is a clean before/after
+        allE = []
+        for p in panels:
             for m in p["lev"]:
-                fit_idx[(_cfgkey(m["config"]), _termkey(m["term"]),
-                         str(float(m["J"])))] = m
-
-    rows = []
-    for p in panels:
-        for m in sorted(p["lev"], key=lambda x: x["E_calc"]):
-            try:
-                Js = "%g" % float(m["J"]); Jk = str(float(m["J"]))
-            except (TypeError, ValueError):
-                Js = str(m["J"]); Jk = Js
-            eo = m["E_obs"]
-            term = _term_mathlabel(p["tk"], p["par"])
-            d_ab = (f"{m['E_calc'] - eo:+.1f}" if eo is not None else "--")
-            if fitted_panels is not None:
-                fm = fit_idx.get((p["cfg"], p["tk"], Jk))
-                efit = (f"{fm['E_fit']:.1f}" if fm else "--")
-                dfit = (f"{fm['E_fit'] - fm['E_obs']:+.1f}"
-                        if fm and fm["E_obs"] is not None else "--")
-                rows.append([p["cfg"], term, Js,
-                             (f"{eo:.1f}" if eo is not None else "--"),
-                             f"{m['E_calc']:.1f}", d_ab, efit, dfit])
-            else:
-                rows.append([p["cfg"], term, Js, f"{m['E_calc']:.1f}",
-                             (f"{eo:.1f}" if eo is not None else "--"), d_ab])
-
-    if fitted_panels is not None:
-        col = ["config", "term", "J", "E_obs", "E_calc", "Δ_abinit",
-               "E_fit", "Δ_fit"]
-        ttl = f"{species}: levels — ab initio and fitted vs observed (cm⁻¹)"
+                allE += [v for v in (m.get("E_calc"), m.get("E_obs"),
+                                     m.get("E_fit")) if v is not None]
+        pad = 0.04 * (max(allE) - min(allE)) if allE else 1.0
+        ylim = (min(allE) - pad, max(allE) + pad) if allE else None
+        _grotrian_page(pdf, species, panels, "E_calc",
+                       "computed (ab initio)",
+                       "term diagram - ab initio vs observed", layout, ylim)
+        _grotrian_page(pdf, species, panels, "E_fit", "fitted (RCE)",
+                       "term diagram - fitted vs observed", layout, ylim)
+        _page_level_table(pdf, species, panels)
     else:
-        col = ["config", "term", "J", "E_calc", "E_obs", "ΔE (cm⁻¹)"]
-        ttl = f"{species}: levels (computed vs observed)"
+        panels = _group_terms(matched)
+        layout = _grotrian_layout(panels)
+        _grotrian_page(pdf, species, panels, "E_calc",
+                       "computed (ab initio)",
+                       "term diagram - ab initio vs observed", layout)
+        _page_level_table_simple(pdf, species, panels)
 
+
+def _table_pages(pdf, ttl, col, rows):
     per = 38
     for start in range(0, max(1, len(rows)), per):
         chunk = rows[start:start + per]
@@ -373,31 +419,83 @@ def _page_level_table(pdf, species, panels, fitted_panels=None):
         pdf.savefig(fig); plt.close(fig)
 
 
-def page_residuals(pdf, species, matched, fitted_panels=None):
-    res = [(m["E_obs"], m["E_calc"] - m["E_obs"], m["term"])
-           for m in matched if m["matched"] and m["E_obs"] is not None]
+def _page_level_table(pdf, species, panels):
+    """Unified table (one row per level): E_obs, E_calc, Δ_abinit, E_fit, Δ_fit.
+    Operates on the unified panels where each level carries all three energies."""
+    rows = []
+    for p in panels:
+        term = _term_mathlabel(p["tk"], p["par"])
+        for m in sorted(p["lev"], key=lambda x: (x.get("E_fit") or 0.0)):
+            try:
+                Js = "%g" % float(m["J"])
+            except (TypeError, ValueError):
+                Js = str(m["J"])
+            eo = m.get("E_obs"); ec = m.get("E_calc"); ef = m.get("E_fit")
+            rows.append([
+                p["cfg"], term, Js,
+                (f"{eo:.1f}" if eo is not None else "--"),
+                (f"{ec:.1f}" if ec is not None else "--"),
+                (f"{ec - eo:+.1f}" if (ec is not None and eo is not None) else "--"),
+                (f"{ef:.1f}" if ef is not None else "--"),
+                (f"{ef - eo:+.1f}" if (ef is not None and eo is not None) else "--"),
+            ])
+    col = ["config", "term", "J", "E_obs", "E_calc", "Δ_abinit", "E_fit", "Δ_fit"]
+    _table_pages(pdf, f"{species}: levels — ab initio & fitted vs observed (cm⁻¹)",
+                 col, rows)
+
+
+def _page_level_table_simple(pdf, species, panels):
+    """Ab-initio-only table (no RCE fit yet)."""
+    rows = []
+    for p in panels:
+        term = _term_mathlabel(p["tk"], p["par"])
+        for m in sorted(p["lev"], key=lambda x: x["E_calc"]):
+            try:
+                Js = "%g" % float(m["J"])
+            except (TypeError, ValueError):
+                Js = str(m["J"])
+            eo = m.get("E_obs")
+            rows.append([p["cfg"], term, Js, f"{m['E_calc']:.1f}",
+                         (f"{eo:.1f}" if eo is not None else "--"),
+                         (f"{m['E_calc'] - eo:+.1f}" if eo is not None else "--")])
+    col = ["config", "term", "J", "E_calc", "E_obs", "ΔE (cm⁻¹)"]
+    _table_pages(pdf, f"{species}: levels (computed vs observed)", col, rows)
+
+
+def page_residuals(pdf, species, matched, unified_panels=None):
+    """Residuals vs observed. With a fit (unified_panels), overlay ab initio
+    (circles) and fitted (diamonds) drawn from the SAME level set. Without a fit,
+    fall back to the ab-initio-only `matched` list."""
     fig, ax = plt.subplots(figsize=(8.0, 5.0))
     ax.axhline(0, color="k", lw=0.6)
     title_bits = []
-    if res:
-        eo = np.array([r[0] for r in res]); dd = np.array([r[1] for r in res])
-        ax.scatter(eo, dd, s=28, color="C0", zorder=3,
-                   label="ab initio")
-        title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(dd**2)):.0f}")
-    if fitted_panels is not None:
-        fres = []
-        for p in fitted_panels:
-            for m in p["lev"]:
-                if m["E_obs"] is not None:
-                    fres.append((m["E_obs"], m["E_fit"] - m["E_obs"]))
-        if fres:
-            eo2 = np.array([r[0] for r in fres])
-            dd2 = np.array([r[1] for r in fres])
-            ax.scatter(eo2, dd2, s=34, color="C3", marker="D", zorder=4,
+    if unified_panels is not None:
+        ab = [(m["E_obs"], m["E_calc"] - m["E_obs"])
+              for p in unified_panels for m in p["lev"]
+              if m.get("E_obs") is not None and m.get("E_calc") is not None]
+        ft = [(m["E_obs"], m["E_fit"] - m["E_obs"])
+              for p in unified_panels for m in p["lev"]
+              if m.get("E_obs") is not None and m.get("E_fit") is not None]
+        if ab:
+            a = np.array(ab)
+            ax.scatter(a[:, 0], a[:, 1], s=28, color="C0", zorder=3,
+                       label="ab initio")
+            title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(a[:,1]**2)):.0f}")
+        if ft:
+            d = np.array(ft)
+            ax.scatter(d[:, 0], d[:, 1], s=34, color="C3", marker="D", zorder=4,
                        label="fitted (RCE)")
-            title_bits.append(f"fit RMS = {np.sqrt(np.mean(dd2**2)):.0f}")
-    if not res and fitted_panels is None:
-        ax.text(0.5, 0.5, "no matched levels", ha="center")
+            title_bits.append(f"fit RMS = {np.sqrt(np.mean(d[:,1]**2)):.0f}")
+    else:
+        res = [(m["E_obs"], m["E_calc"] - m["E_obs"])
+               for m in matched if m["matched"] and m["E_obs"] is not None]
+        if res:
+            a = np.array(res)
+            ax.scatter(a[:, 0], a[:, 1], s=28, color="C0", zorder=3,
+                       label="ab initio")
+            title_bits.append(f"ab initio RMS = {np.sqrt(np.mean(a[:,1]**2)):.0f}")
+        else:
+            ax.text(0.5, 0.5, "no matched levels", ha="center")
     ax.set_title(f"{species}: level residuals   "
                  + ("(" + ", ".join(title_bits) + " cm$^{-1}$)"
                     if title_bits else ""), fontsize=11)
@@ -438,20 +536,21 @@ def main():
     nist = load_nist(a.nist)
     matched = match_levels(calc, nist)
 
-    fitted_panels = None
+    fitted = None
+    unified = None
     if a.levels1 and os.path.exists(a.levels1):
-        fitted = parse_levels1(a.levels1)
+        fitted = parse_levels1(a.levels1) or None
         if fitted:
-            fitted_panels = _group_fitted(fitted)
+            unified = build_unified_panels(calc, fitted)
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
-        page_levels(pdf, a.species, matched, fitted_panels)
-        page_residuals(pdf, a.species, matched, fitted_panels)
+        page_levels(pdf, a.species, matched, fitted, calc)
+        page_residuals(pdf, a.species, matched, unified)
         # gf-vs-wavelength page deferred: only meaningful once RCE produces many
         # lines and we have a reference (Kurucz/lab) gf to compare against.
-    nfit = sum(len(p["lev"]) for p in fitted_panels) if fitted_panels else 0
+    nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "
           f"{nfit} fitted)")
