@@ -339,6 +339,7 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
     ax.set_title(f"{species}: {title}", fontsize=14, pad=12)
 
     half = 0.40
+    any_ai = False     # did we draw any autoionizing (above-limit) level?
     # collect, per column, the label points (energy, orbital) to de-collide
     for p in panels:
         xc = colx.get((p["tk"], p["par"]))
@@ -347,24 +348,39 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
         for m in p["lev"]:
             es = m.get(efield); eo = m.get("E_obs")
             orb = _running_orbital(m.get("config", ""))
+            # a level above the first ionization limit is autoionizing (a
+            # doubly-excited resonance embedded in the continuum) -> tag it.
+            e_ref = es if es is not None else eo
+            ai = ie_cm is not None and e_ref is not None and e_ref > ie_cm
+            lab = orb + ("  (AI)" if ai else "")
+            any_ai = any_ai or ai
             if es is not None:
                 ax.hlines(es, xc - half, xc + half, color=COL_ABINITIO, lw=1.6)
-                ax.text(xc + half + 0.04, es, orb, va="center", ha="left",
-                        fontsize=8, color="0.35")
+                ax.text(xc + half + 0.04, es, lab, va="center", ha="left",
+                        fontsize=10.5, color="0.30",
+                        fontstyle="italic" if ai else "normal")
             if eo is not None:
                 ax.hlines(eo, xc - half, xc + half, color=COL_FIT, lw=1.2,
                           ls="--", alpha=0.9)
+                if es is None:   # observed-only level still gets its (AI) tag
+                    ax.text(xc + half + 0.04, eo, lab, va="center", ha="left",
+                            fontsize=10.5, color="0.30",
+                            fontstyle="italic" if ai else "normal")
 
     # ionization limit, labelled with the actual energy in eV
     if ie_cm is not None:
         ax.axhline(ie_cm, color="0.3", lw=1.0, ls="--")
         ax.text(nx - 0.3, ie_cm, f" ionization limit ({ie_cm / EV:.2f} eV)",
-                va="bottom", ha="right", fontsize=8, color="0.3")
+                va="bottom", ha="right", fontsize=11, color="0.3")
+        if any_ai:
+            ax.text(nx - 0.3, ie_cm, "levels above are autoionizing (AI) ",
+                    va="top", ha="right", fontsize=9.5, color="0.45",
+                    fontstyle="italic")
 
     # x-axis: term symbols
     ax.set_xticks([x for _, _, x in cols])
     ax.set_xticklabels([_term_mathlabel(tk, par) for tk, par, _ in cols],
-                       fontsize=11)
+                       fontsize=13)
 
     ax.set_xlim(-0.8, nx - 0.2)
     if ylim is not None:
@@ -383,7 +399,7 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
     handles = [Line2D([0], [0], color=COL_ABINITIO, lw=1.6, label=solid_label),
                Line2D([0], [0], color=COL_FIT, lw=1.2, ls="--",
                       label="observed (NIST)")]
-    ax.legend(handles=handles, frameon=False, fontsize=9, loc="lower right")
+    ax.legend(handles=handles, frameon=False, fontsize=11, loc="lower right")
     fig.tight_layout(rect=[0.04, 0.02, 1, 1.0])
     pdf.savefig(fig); plt.close(fig)
 
