@@ -33,7 +33,8 @@ cp -f OUTG11 OUTG11.abinitio          # keep the pre-fit spectrum for comparison
 cp -f ING11  ING11.abinitio           # keep the ab initio parameter deck
 
 echo "[4/6] build INE20 (substitute NIST observed levels, free parameters)"
-python3 "$ROOT/tools/build_ine20.py" --outgine OUTGINE --nist "$NIST" --out INE20
+python3 "$ROOT/tools/build_ine20.py" --outgine OUTGINE --nist "$NIST" \
+    --outg11 OUTG11.abinitio --out INE20
 cp -f INE20 OUTGINE                    # RCE reads the file named OUTGINE
 
 echo "[5/6] RCE  (semi-empirical least-squares fit)"

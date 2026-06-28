@@ -26,13 +26,39 @@ Usage:
         --nist data/nist/MgI_levels.tsv --out work/mg1/INE20
 """
 import argparse
+import os
 import re
 
 KK = 1000.0
 
 
-def load_nist_by_Jparity(path):
-    """Return dict (parity, Jstr) -> sorted list of observed E in kK."""
+def _termkey(term):
+    """multiplicity+L core, ignoring any parent: '(2S) 3P'->'3P', '3P'->'3P'."""
+    t = re.sub(r"\([^)]*\)", " ", term)
+    ms = re.findall(r"\d[A-Z]", t)
+    return ms[-1] if ms else term.strip()
+
+
+_ORB = re.compile(r"[1-9][spdfghik]\d?(?![spdfghik])")
+
+
+def _cfgkey(config):
+    """Reduce a config to its outer valence orbital(s), occupation-normalized,
+    matching the scheme in make_report so NIST and computed labels agree."""
+    toks = _ORB.findall(config)
+    norm = []
+    for t in toks:
+        m = re.match(r"([1-9][spdfghik])(\d?)", t)
+        nl, occ = m.group(1), m.group(2)
+        norm.append(nl + (occ if occ and occ != "1" else ""))
+    if norm and re.fullmatch(r"[1-9][spdfghik]2", norm[-1]):
+        return norm[-1]
+    return ".".join(norm[-2:]) if norm else config.strip()
+
+
+def load_nist_levels(path):
+    """Return dict (parity, Jstr) -> list of dicts {E_kK, cfgk, tk} for observed
+    (non-predicted) levels, keeping config and term so we can match by identity."""
     table = {}
     with open(path) as f:
         for ln in f:
@@ -41,19 +67,36 @@ def load_nist_by_Jparity(path):
             p = ln.rstrip("\n").split("\t")
             if len(p) < 6:
                 continue
-            J, level, parity, pred = p[2], p[3], p[4], p[5]
+            config, term, J, level, parity, pred = p[0], p[1], p[2], p[3], p[4], p[5]
             try:
-                Jf = float(J)
-                E = float(level)
+                Jf = float(J); E = float(level)
             except ValueError:
                 continue
-            if pred == "1":           # skip NIST-flagged predicted/uncertain
+            if pred == "1":
                 continue
-            key = (parity, "%g" % Jf)
-            table.setdefault(key, []).append(E / KK)
-    for k in table:
-        table[k].sort()
+            table.setdefault((parity, "%g" % Jf), []).append(
+                {"E": E / KK, "cfgk": _cfgkey(config), "tk": _termkey(term)})
     return table
+
+
+def load_computed_terms(outg11_path):
+    """From OUTG11, get the computed levels per (parity, Jstr) in ENERGY ORDER,
+    each tagged with (cfgk, tk) -- this gives the term identity of each OUTGINE
+    J-slot (slots are in energy order). Returns dict (parity,J)->[(cfgk,tk),...]."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location(
+        "parse_cowan", os.path.join(here, "parse_cowan.py"))
+    pc = importlib.util.module_from_spec(spec); spec.loader.exec_module(pc)
+    calc, _ = pc.parse_outg11(outg11_path)
+    out = {}
+    for c in calc:
+        out.setdefault((c["parity"], "%g" % float(c["J"])), []).append(
+            {"E": c["E_calc"] / KK, "cfgk": _cfgkey(c["config"]),
+             "tk": _termkey(c["term"])})
+    for k in out:
+        out[k].sort(key=lambda d: d["E"])
+    return out
 
 
 FLOAT7 = re.compile(r"(-?\d+\.\d+|-?\d+\.|\d*\.\d+)")
@@ -105,10 +148,10 @@ def fmt_flags(flags):
     return "".join(f"{f:10d}" for f in flags)
 
 
-def build(outgine_path, nist_table, out_path):
+def build(outgine_path, nist_levels, computed_terms, out_path):
     with open(outgine_path) as f:
         lines = f.readlines()
-    _build_focused(lines, nist_table, out_path)
+    _build_focused(lines, nist_levels, computed_terms, out_path)
 
 
 def _infer_block_parity(header_block_lines):
@@ -128,10 +171,12 @@ def _infer_block_parity(header_block_lines):
     return "o" if lsum % 2 else "e"
 
 
-def _build_focused(lines, nist_table, out_path):
+def _build_focused(lines, nist_levels, computed_terms, out_path):
     """Walk blocks; within each, replace consecutive (value-line, flag-line)
     pairs (one per J, ascending from the block's minimum J) with observed
-    levels for that (parity, J)."""
+    levels. Each computed J-slot (energy-ordered) is matched to the observed
+    NIST level of the SAME (config, term) identity -- not by energy rank, which
+    swaps near-degenerate same-J terms (e.g. 3s3d 1D vs 3D)."""
     out = list(lines)
     n = len(lines)
     i = 0
@@ -168,15 +213,32 @@ def _build_focused(lines, nist_table, out_path):
             while (j + 1 < n and is_value_line(lines[j])
                    and _is_level_flag_line(lines[j + 1])):
                 ncomp = len(FLOAT7.findall(lines[j]))
-                obs = list(nist_table.get((parity, "%g" % Jval), []))
+                Jkey = (parity, "%g" % Jval)
+                slots = computed_terms.get(Jkey, [])     # energy-ordered
+                obs = list(nist_levels.get(Jkey, []))
+                # Match by TERM (multiplicity+L), not config (OUTG11 mislabels the
+                # per-level config). Within each term, pair computed and observed
+                # in energy order -- this handles the Rydberg series AND fixes the
+                # near-degenerate same-J term swap (e.g. 1D vs 3D).
+                obs_by_term = {}
+                for o in sorted(obs, key=lambda d: d["E"]):
+                    obs_by_term.setdefault(o["tk"], []).append(o)
+                seen_term = {}
                 newvals, newflags = [], []
                 for m in range(ncomp):
-                    if m < len(obs):
-                        newvals.append(obs[m]); newflags.append(m + 1)
+                    comp = float(FLOAT7.findall(lines[j])[m])
+                    match = None
+                    if m < len(slots):
+                        tk = slots[m]["tk"]
+                        rank = seen_term.get(tk, 0)      # which one of this term
+                        seen_term[tk] = rank + 1
+                        cand = obs_by_term.get(tk, [])
+                        if rank < len(cand):
+                            match = cand[rank]
+                    if match is not None:
+                        newvals.append(match["E"]); newflags.append(m + 1)
                     else:
-                        # no observed level: keep computed placeholder, exclude
-                        comp = float(FLOAT7.findall(lines[j])[m])
-                        newvals.append(comp); newflags.append(-(m + 1))
+                        newvals.append(comp); newflags.append(-(m + 1))  # exclude
                 out[j] = fmt_values(newvals) + "\n"
                 out[j + 1] = fmt_flags(newflags) + "\n"
                 j += 2
@@ -255,10 +317,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outgine", required=True)
     ap.add_argument("--nist", required=True)
+    ap.add_argument("--outg11", required=True,
+                    help="ab initio OUTG11, for per-slot term identities.")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    nist = load_nist_by_Jparity(a.nist)
-    build(a.outgine, nist, a.out)
+    nist = load_nist_levels(a.nist)
+    cterms = load_computed_terms(a.outg11)
+    build(a.outgine, nist, cterms, a.out)
     print(f"wrote {a.out}")
 
 
