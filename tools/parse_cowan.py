@@ -53,6 +53,44 @@ def parse_outg11(path):
     return _parse_levels(text), _parse_lines(text)
 
 
+def parse_levels1(path):
+    """Parse RCE's LEVELS1 output -> list of dicts with the OBSERVED and FITTED
+    energies together:
+        {config, term, J, parity, E_obs, E_fit}   (energies in cm^-1)
+    LEVELS1 row format (energies in kK):
+        <E_obs> <E_fit> <residual> <gJ> <config> J= <J> <pct>% <conf> (<parent>) <term> ...
+    The first numeric is observed, the second fitted. The dominant component's
+    term (after the leading percentage) gives the label.
+    """
+    out = []
+    with open(path, errors="replace") as f:
+        for ln in f:
+            s = ln.rstrip("\n")
+            if not s.strip() or "J=" not in s:
+                continue
+            # leading: E_obs  E_fit  residual  gJ  config
+            m = re.match(r"\s*(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+"
+                         r"(-?\d+\.\d+)\s+(\S+)\s+J=\s*([\d.]+)", s)
+            if not m:
+                continue
+            # dominant component's term. LEVELS1 contains BOTH an LS-coupling
+            # block (parent like '(2S) 3P') and a JJ-coupling block (parent like
+            # '(2S 1/2) 1/2'). Keep only LS rows: the term token is <mult><L>
+            # with NO slash in the parenthetical.
+            mc = re.search(r"\d+%\s+\S+\s+\(([^)]*)\)\s*(\d[A-Z]\*?)", s)
+            if not mc or "/" in mc.group(1):
+                continue                       # skip JJ-coupling rows
+            term = mc.group(2)
+            E_obs = float(m.group(1)) * KK
+            E_fit = float(m.group(2)) * KK
+            config = m.group(5)
+            J = m.group(6)
+            parity = _parity_from_config(config)
+            out.append({"config": config, "term": term, "J": J,
+                        "parity": parity, "E_obs": E_obs, "E_fit": E_fit})
+    return out
+
+
 def _parse_levels(text):
     """Extract computed levels from the EIGENVALUES / EIGENVECTORS blocks.
 
