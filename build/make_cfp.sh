@@ -6,7 +6,7 @@
 # Output: build/cfp/{FOR072,FOR073,FOR074}
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SRC="$HERE/../cowan_nist/extracted/CODE"
+SRC="$HERE/../cowan_nist/extracted/code"
 CFP="$HERE/cfp"
 mkdir -p "$CFP"; cd "$CFP"
 

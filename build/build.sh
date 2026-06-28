@@ -4,7 +4,7 @@
 #
 # Source: NIST PDR "A suite of atomic structure codes originally developed by
 #   R. D. Cowan adapted for Windows-based personal computers" (Kramida, v.2021),
-#   doi:10.18434/T4/1502500. Fortran sources from the FOR/ subdir.
+#   doi:10.18434/T4/1502500. Fortran sources from the for/ subdir.
 #
 # Flags: Kramida's recommended gfortran flags (gfortran_O3.bat) MINUS -malign-double
 #   (x86-only; absent on Apple Silicon arm64), PLUS -std=legacy -fallow-argument-mismatch

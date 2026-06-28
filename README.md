@@ -44,8 +44,11 @@ See `docs/` and the planning notes for the full rationale and research basis.
       build.sh      compile all four programs with gfortran -> build/bin/
       make_cfp.sh   generate the binary CFP decks RCG needs (run once)
       cfp/          generated decks + run scratch (gitignored)
-    cowan_nist/     vendored NIST/Kramida package (source+docs+scripts;
-                    zip and Windows .exe/.dll are gitignored)
+    cowan_nist/     vendored NIST/Kramida package (zip & Windows .exe/.dll removed)
+      extracted/for/    pristine Fortran source (RCN36K.F, RCN2K.F, rcg11k.f, RCE20K.F)
+      extracted/code/   perl utilities, .bat reference scripts, ING11.CFP, SENIOR
+      extracted/work/   example input decks (IN2, IN36, ...)
+      extracted/*_DOC.txt, readme.cowan.htm   the Cowan documentation
     tools/          pipeline/orchestration code (to come)
     work/           per-ion working calculations (to come)
     notes/, docs/   build notes, methodology, references
