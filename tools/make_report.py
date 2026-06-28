@@ -54,18 +54,20 @@ plt.rcParams.update({
     "axes.linewidth": 0.9,
     "axes.titlesize": 14,
     "axes.labelsize": 14,
-    "legend.fontsize": 12,
+    "legend.fontsize": 9.5,
     "xtick.direction": "in", "ytick.direction": "in",
     "xtick.top": True, "ytick.right": True,
     "xtick.major.size": 4, "ytick.major.size": 4,
     # keep all four spines: every plot is fully boxed by axes
 })
 
-# Curated series palette (slate blue / brick red / muted teal-green), used for
-# ab initio, our fit, and Kurucz respectively on every page.
-COL_ABINITIO = "#3b6ea5"   # slate blue
-COL_FIT      = "#b0413e"   # brick red
-COL_KURUCZ   = "#3f8f6b"   # muted teal-green
+# Colourblind-safe series palette (darkened Okabe-Ito family: distinguishable
+# under red-green colour blindness). No red+green pair: deep blue / dark amber /
+# dark purple for ab initio, our fit, and Kurucz respectively, used on every
+# page. Marker SHAPE also differs per series as a second, colour-independent cue.
+COL_ABINITIO = "#004C8C"   # deep blue
+COL_FIT      = "#B26B00"   # dark amber
+COL_KURUCZ   = "#8E2F6E"   # dark purple
 
 # Distinct OPEN marker per series (same shape/colour for a series on every page).
 MK_ABINITIO = "o"
@@ -334,7 +336,7 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
     colx, cols, nx = layout["colx"], layout["cols"], layout["nx"]
 
     fig, ax = plt.subplots(figsize=(max(7.0, 0.85 * nx + 2.5), 9.0))
-    fig.suptitle(f"{species}: {title}", fontsize=14, y=0.97)
+    ax.set_title(f"{species}: {title}", fontsize=14, pad=12)
 
     half = 0.40
     # collect, per column, the label points (energy, orbital) to de-collide
@@ -346,11 +348,11 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
             es = m.get(efield); eo = m.get("E_obs")
             orb = _running_orbital(m.get("config", ""))
             if es is not None:
-                ax.hlines(es, xc - half, xc + half, color="C0", lw=1.6)
+                ax.hlines(es, xc - half, xc + half, color=COL_ABINITIO, lw=1.6)
                 ax.text(xc + half + 0.04, es, orb, va="center", ha="left",
-                        fontsize=8, color="C3")
+                        fontsize=8, color="0.35")
             if eo is not None:
-                ax.hlines(eo, xc - half, xc + half, color="C3", lw=1.2,
+                ax.hlines(eo, xc - half, xc + half, color=COL_FIT, lw=1.2,
                           ls="--", alpha=0.9)
 
     # ionization limit, labelled with the actual energy in eV
@@ -378,11 +380,11 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
     axr.spines["right"].set_linewidth(0.8)
 
     from matplotlib.lines import Line2D
-    handles = [Line2D([0], [0], color="C0", lw=1.6, label=solid_label),
-               Line2D([0], [0], color="C3", lw=1.2, ls="--",
+    handles = [Line2D([0], [0], color=COL_ABINITIO, lw=1.6, label=solid_label),
+               Line2D([0], [0], color=COL_FIT, lw=1.2, ls="--",
                       label="observed (NIST)")]
     ax.legend(handles=handles, frameon=False, fontsize=9, loc="lower right")
-    fig.tight_layout(rect=[0.04, 0.02, 1, 0.94])
+    fig.tight_layout(rect=[0.04, 0.02, 1, 1.0])
     pdf.savefig(fig); plt.close(fig)
 
 
@@ -682,7 +684,7 @@ def page_residuals(pdf, species, matched, unified_panels=None,
             ylim = max(50.0, 1.15 * np.abs(allfit).max())
             a_zoom.set_ylim(-ylim, ylim)
 
-    a_full.legend(frameon=False)
+    a_full.legend(frameon=False, loc="lower right")
     for ax in (a_full, a_zoom):
         ax.set_xlabel(xlab)
         ax.set_ylabel(ylab)
