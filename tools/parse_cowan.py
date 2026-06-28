@@ -164,19 +164,21 @@ def _parse_lines(text):
             continue
         if not in_tab:
             continue
-        # upper-level marker: " * * *   <E>  <J>  <idx> (..)<term>  <#> <conf> * * *"
-        m_up = re.search(r"\* \* \*\s+(-?[\d.]+)\s+([\d.]+)\s+\d+\s+(\(.*?\)\s*\d[A-Z]\*?)", ln)
+        # upper-level marker:
+        #  " * * *  <E> <J> <idx> (parent)<term>  <#> <species> <config>  * * *"
+        m_up = re.search(
+            r"\* \* \*\s+(-?[\d.]+)\s+([\d.]+)\s+\d+\s+(\(.*?\)\s*\d[A-Z]\*?)"
+            r"\s+\d+\s+\S.*?\s+(\S+)\s+\* \* \*", ln)
         if m_up:
             upper = {"E": float(m_up.group(1)) * KK, "J": m_up.group(2),
-                     "term": re.sub(r"\s+", " ", m_up.group(3)).strip()}
+                     "term": re.sub(r"\s+", " ", m_up.group(3)).strip(),
+                     "config": m_up.group(4).strip()}
             continue
-        # transition rows
+        # transition rows: "<idx> <E_low> <J_low> <N> (parent)<term_low> ... lam loggf GA ..."
+        m_row = re.match(
+            r"\s*\d+\s+(-?[\d.]+)\s+([\d.]+)\s+\d+\s+(\(.*?\)\s*\d[A-Z]\*?)", ln)
         toks = ln.split()
-        if len(toks) >= 8 and upper is not None:
-            try:
-                int(toks[0])
-            except ValueError:
-                continue
+        if m_row and len(toks) >= 8 and upper is not None:
             gi = next((i for i, t in enumerate(toks)
                        if re.match(r"^[\d.]+E[+-]\d+$", t)), None)
             if gi is None or gi < 3:
@@ -184,14 +186,17 @@ def _parse_lines(text):
             try:
                 lam = float(toks[gi - 2]); loggf = float(toks[gi - 1])
                 GA = float(toks[gi])
-                E_low = float(toks[1]) * KK
-                J_low = toks[2]
+                E_low = float(m_row.group(1)) * KK
+                J_low = m_row.group(2)
+                term_low = re.sub(r"\s+", " ", m_row.group(3)).strip()
             except (ValueError, IndexError):
                 continue
             if 0 < lam < 1e6 and -15 < loggf < 5:
                 out.append({"E_low": E_low, "J_low": J_low,
+                            "term_low": term_low,
                             "E_up": upper["E"], "J_up": upper["J"],
                             "term_up": upper["term"],
+                            "config_up": upper.get("config", "?"),
                             "lambda_A": lam, "loggf": loggf, "GA": GA})
     return out
 

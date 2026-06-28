@@ -565,19 +565,86 @@ def page_residuals(pdf, species, matched, unified_panels=None):
     fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
 
 
-def page_gf(pdf, species, lines):
-    fig, ax = plt.subplots(figsize=(8.0, 5.0))
-    if lines:
-        lam = np.array([d["lambda_A"] for d in lines])
-        gf = np.array([d["loggf"] for d in lines])
-        ax.scatter(lam, gf, s=10, color="C0", alpha=0.6, edgecolors="none")
-        ax.set_title(f"{species}: computed E1 spectrum "
-                     f"({len(lines)} lines)", fontsize=11)
+def load_nist_lines(path):
+    """Read cached NIST lines (ritz_wl_A, log_gf, gA, acc, conf/term/J for
+    lower & upper). Returns list of dicts."""
+    out = []
+    with open(path) as f:
+        for ln in f:
+            if ln.startswith("#") or not ln.strip():
+                continue
+            p = ln.rstrip("\n").split("\t")
+            if len(p) < 10:
+                continue
+            try:
+                out.append({"lambda_A": float(p[0]), "loggf": float(p[1]),
+                            "acc": p[3],
+                            "conf_i": p[4], "term_i": p[5], "J_i": p[6],
+                            "conf_k": p[7], "term_k": p[8], "J_k": p[9]})
+            except ValueError:
+                continue
+    return out
+
+
+def _term_only(t):
+    """multiplicity+L from a term that may include a parent, e.g. '(2S) 3P'->'3P'."""
+    return _termkey(t)
+
+
+def _linekey_unordered(t_a, J_a, t_b, J_b):
+    """Transition identity by the two levels' (term, J), order-independent."""
+    a = (_term_only(t_a), _Jkey(J_a))
+    b = (_term_only(t_b), _Jkey(J_b))
+    return tuple(sorted([a, b]))
+
+
+def page_gf(pdf, species, comp_lines, nist_lines, solid_label="computed"):
+    """Compare computed log gf to NIST log gf for matched transitions.
+    A transition's (term,J) pair is NOT unique across a Rydberg series, so we
+    match within same-(term-pair, J-pair) candidates by CLOSEST wavelength, and
+    only accept matches within a tolerance (computed/fitted wavelengths are near
+    the observed ones). This avoids cross-series mismatches.
+    Left: 1:1 scatter; right: residual vs wavelength."""
+    # bucket NIST lines by (termpair, Jpair)
+    buckets = {}
+    for d in nist_lines:
+        k = _linekey_unordered(d["term_i"], d["J_i"], d["term_k"], d["J_k"])
+        buckets.setdefault(k, []).append(d)
+
+    TOL = 0.05   # fractional wavelength tolerance for accepting a match
+    pairs = []   # (loggf_comp, loggf_nist, lambda, acc)
+    for d in comp_lines:
+        k = _linekey_unordered(d.get("term_low", "?"), d.get("J_low", "?"),
+                               d.get("term_up", "?"), d.get("J_up", "?"))
+        cands = buckets.get(k)
+        if not cands:
+            continue
+        lam = d["lambda_A"]
+        n = min(cands, key=lambda c: abs(c["lambda_A"] - lam))
+        if abs(n["lambda_A"] - lam) / lam > TOL:
+            continue                       # nearest candidate too far -> no match
+        pairs.append((d["loggf"], n["loggf"], lam, n["acc"]))
+
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
+    if pairs:
+        c = np.array([p[0] for p in pairs]); nlg = np.array([p[1] for p in pairs])
+        a1.plot([-8, 1], [-8, 1], color="0.6", lw=0.8, ls="--")
+        a1.scatter(nlg, c, s=26, color="C0", zorder=3)
+        a1.set_xlabel("NIST $\\log gf$"); a1.set_ylabel(f"{solid_label} $\\log gf$")
+        a1.set_title(f"{species}: {len(pairs)} matched lines", fontsize=10)
+        d = c - nlg
+        a2.axhline(0, color="k", lw=0.6)
+        a2.scatter([p[2] for p in pairs], d, s=26, color="C0")
+        a2.set_xlabel("Wavelength (Å)")
+        a2.set_ylabel(f"$\\Delta\\log gf$ ({solid_label} $-$ NIST)")
+        a2.set_title(f"RMS $\\Delta\\log gf$ = {np.sqrt(np.mean(d**2)):.2f}",
+                     fontsize=10)
     else:
-        ax.text(0.5, 0.5, "no lines", ha="center")
-    ax.set_xlabel("Wavelength $\\lambda$  (Å)")
-    ax.set_ylabel("$\\log gf$")
-    fig.tight_layout(); pdf.savefig(fig); plt.close(fig)
+        a1.text(0.5, 0.5, "no matched lines", ha="center")
+    fig.suptitle(f"{species}: gf comparison ({solid_label} vs NIST)",
+                 fontsize=12, y=0.99)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    pdf.savefig(fig); plt.close(fig)
 
 
 # ----------------------------------------------------------------------------
@@ -591,6 +658,10 @@ def main():
                     help="RCE LEVELS1 output; if given, add fitted-vs-observed.")
     ap.add_argument("--ie", default=None,
                     help="ionization-energy table (species<TAB>IE_cm1).")
+    ap.add_argument("--gf-fitted", default=None,
+                    help="OUTG11 from the fitted-parameter RCG run (fitted gf).")
+    ap.add_argument("--nist-lines", default=None,
+                    help="cached NIST lines table (reference log gf).")
     ap.add_argument("--fit-rms", type=float, default=None)
     a = ap.parse_args()
 
@@ -606,13 +677,21 @@ def main():
         if fitted:
             unified = build_unified_panels(calc, fitted)
 
+    nist_lines = (load_nist_lines(a.nist_lines)
+                  if a.nist_lines and os.path.exists(a.nist_lines) else None)
+    fitted_lines = None
+    if a.gf_fitted and os.path.exists(a.gf_fitted):
+        _, fitted_lines = parse_outg11(a.gf_fitted)
+
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
         page_levels(pdf, a.species, matched, fitted, calc, ie_cm)
         page_residuals(pdf, a.species, matched, unified)
-        # gf-vs-wavelength page deferred: only meaningful once RCE produces many
-        # lines and we have a reference (Kurucz/lab) gf to compare against.
+        if nist_lines:
+            page_gf(pdf, a.species, lines, nist_lines, "ab initio")
+            if fitted_lines:
+                page_gf(pdf, a.species, fitted_lines, nist_lines, "fitted (RCE)")
     nfit = sum(len(p["lev"]) for p in unified) if unified else 0
     print(f"wrote {a.out}  ({len(matched)} levels, {len(lines)} lines, "
           f"{sum(m['matched'] for m in matched)} matched to NIST, "
