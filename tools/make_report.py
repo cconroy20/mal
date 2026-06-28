@@ -46,6 +46,24 @@ plt.rcParams.update({
 # ----------------------------------------------------------------------------
 # data loading / matching
 # ----------------------------------------------------------------------------
+def load_ie(path, species):
+    """Read an ionization-energy table (species<TAB>IE_cm1); return IE in cm^-1
+    for `species`, or None."""
+    if not path or not os.path.exists(path):
+        return None
+    with open(path) as f:
+        for ln in f:
+            if ln.startswith("#") or not ln.strip():
+                continue
+            parts = ln.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[0].strip() == species:
+                try:
+                    return float(parts[1])
+                except ValueError:
+                    return None
+    return None
+
+
 def load_nist(path):
     rows = []
     with open(path) as f:
@@ -180,6 +198,23 @@ def _segments(energies, gap_factor=4.0, min_gap=3000.0):
 
 
 _LMAP = {"S": 0, "P": 1, "D": 2, "F": 3, "G": 4, "H": 5, "I": 6, "K": 7}
+_ORB_TOK = re.compile(r"[1-9][spdfghik]\d?(?![spdfghik])")
+
+
+def _running_orbital(config):
+    """The 'running' (valence/Rydberg) orbital of a configuration, e.g.
+    '3s.3p' -> '3p', '3s.4d' -> '4d', '2p6.3s2' -> '3s'. Strips occupation."""
+    toks = _ORB_TOK.findall(config)
+    clean = [re.match(r"[1-9][spdfghik]", t).group(0) for t in toks]
+    # the core s electron (lowest s that's doubly closed-ish) is '3s' for Mg-like;
+    # generally the running orbital is the last (outermost) token.
+    noncore = [o for o in clean if o != clean[0]] if len(clean) > 1 else clean
+    return (noncore[-1] if noncore else clean[-1]) if clean else "?"
+
+
+def _Lof(term):
+    m = re.match(r"\d+([A-Z])", _termkey(term))
+    return _LMAP.get(m.group(1), 9) if m else 9
 
 
 def _term_mathlabel(term, parity):
@@ -218,77 +253,106 @@ def _group_terms(matched):
 
 
 def _grotrian_layout(panels):
-    """Fixed left-to-right column assignment: even-parity block, gap, odd-parity
-    block, each ordered by energy. Returned so multiple pages share it exactly."""
-    even = sorted([p for p in panels if p["par"] == "e"], key=_term_sort_key)
-    odd = sorted([p for p in panels if p["par"] == "o"], key=_term_sort_key)
-    layout = []
+    """Na I-style column assignment: ONE column per term SYMBOL (multiplicity +
+    L + parity), e.g. 3S, 1S, 3P*, 1P*, 3D, 1D, ... All configurations of a term
+    (3s3p, 3s4p, ...) stack in that single column. Even-parity block on the left,
+    odd on the right; within a block, order by (multiplicity, L). Returns a dict
+    termkey+parity -> column x, plus the ordered column metadata."""
+    # collect distinct (termkey, parity)
+    terms = {}
+    for p in panels:
+        key = (p["tk"], p["par"])
+        terms.setdefault(key, True)
+    def order(k):
+        tk, par = k
+        m = re.match(r"(\d+)", tk)
+        mult = int(m.group(1)) if m else 9
+        return (_Lof(tk), -mult)            # by L, triplets before singlets
+    even = sorted([k for k in terms if k[1] == "e"], key=order)
+    odd = sorted([k for k in terms if k[1] == "o"], key=order)
+    colx = {}
+    cols = []          # (termkey, parity, x)
     x = 0
-    for p in even:
-        layout.append((p, x)); x += 1
-    x += 1
-    for p in odd:
-        layout.append((p, x)); x += 1
-    return layout
+    for k in even:
+        colx[k] = x; cols.append((k[0], k[1], x)); x += 1
+    x += 1             # gap between parity blocks
+    for k in odd:
+        colx[k] = x; cols.append((k[0], k[1], x)); x += 1
+    return {"colx": colx, "cols": cols, "nx": max(1, x)}
+
+
+EV = 8065.544   # cm^-1 per eV
 
 
 def _grotrian_page(pdf, species, panels, efield, solid_label, title,
-                   layout=None, ylim=None):
-    """Draw one Grotrian term diagram. `efield` selects the solid-line energy
-    key on each level ('E_calc' for ab initio, 'E_fit' for the RCE fit); NIST
-    observed ('E_obs') is always the dashed overlay. `layout` (from
-    _grotrian_layout) fixes the x-columns so before/after pages align exactly."""
+                   layout=None, ylim=None, ie_cm=None):
+    """Na I-style Grotrian diagram. One column per term symbol; all levels of a
+    term stack in that column, each a short horizontal tick labelled by its
+    running orbital (red). `efield` selects the solid-line energy ('E_calc' ab
+    initio or 'E_fit' fitted); NIST observed is the dashed overlay. Left y-axis
+    in cm^-1, right y-axis in eV. Optional ionization limit drawn dashed."""
     if layout is None:
         layout = _grotrian_layout(panels)
-    even = [p for p in panels if p["par"] == "e"]
-    odd = [p for p in panels if p["par"] == "o"]
-    nx = max(1, (max(xc for _, xc in layout) + 1) if layout else 1)
+    colx, cols, nx = layout["colx"], layout["cols"], layout["nx"]
 
-    fig, ax = plt.subplots(figsize=(max(7.0, 0.9 * nx + 2), 9.0))
+    fig, ax = plt.subplots(figsize=(max(7.0, 0.85 * nx + 2.5), 9.0))
     fig.suptitle(f"{species}: {title}", fontsize=14, y=0.97)
 
-    half = 0.36
-    for p, xc in layout:
+    half = 0.40
+    # collect, per column, the label points (energy, orbital) to de-collide
+    for p in panels:
+        xc = colx.get((p["tk"], p["par"]))
+        if xc is None:
+            continue
         for m in p["lev"]:
-            es = m.get(efield)
-            eo = m.get("E_obs")
+            es = m.get(efield); eo = m.get("E_obs")
+            orb = _running_orbital(m.get("config", ""))
             if es is not None:
-                ax.hlines(es, xc - half, xc + half, color="C0", lw=1.8)
+                ax.hlines(es, xc - half, xc + half, color="C0", lw=1.6)
+                ax.text(xc + half + 0.04, es, orb, va="center", ha="left",
+                        fontsize=8, color="C3")
             if eo is not None:
-                ax.hlines(eo, xc - half, xc + half, color="C3", lw=1.4, ls="--")
+                ax.hlines(eo, xc - half, xc + half, color="C3", lw=1.2,
+                          ls="--", alpha=0.9)
 
-    ax.set_xticks([xc for _, xc in layout])
-    ax.set_xticklabels(
-        [rf"{_term_mathlabel(p['tk'], p['par'])}" for p, _ in layout],
-        fontsize=9)
-    for p, xc in layout:
-        ax.annotate(p["cfg"], xy=(xc, 0), xycoords=("data", "axes fraction"),
-                    xytext=(0, -28), textcoords="offset points",
-                    ha="center", va="top", fontsize=7, color="0.4")
-    if even:
-        xe = np.mean([xc for p, xc in layout if p["par"] == "e"])
-        ax.text(xe, 1.01, "even parity", transform=ax.get_xaxis_transform(),
-                ha="center", va="bottom", fontsize=9, style="italic")
-    if odd:
-        xo = np.mean([xc for p, xc in layout if p["par"] == "o"])
-        ax.text(xo, 1.01, "odd parity", transform=ax.get_xaxis_transform(),
-                ha="center", va="bottom", fontsize=9, style="italic")
+    # ionization limit
+    if ie_cm is not None:
+        ax.axhline(ie_cm, color="0.3", lw=1.0, ls="--")
+        ax.text(nx - 0.3, ie_cm, " ionization limit", va="bottom", ha="right",
+                fontsize=8, color="0.3")
+
+    # x-axis: term symbols
+    ax.set_xticks([x for _, _, x in cols])
+    ax.set_xticklabels([_term_mathlabel(tk, par) for tk, par, _ in cols],
+                       fontsize=11)
+    # parity block headers
+    for par, lab in (("e", "even parity"), ("o", "odd parity")):
+        xs = [x for tk, pp, x in cols if pp == par]
+        if xs:
+            ax.text(np.mean(xs), 1.01, lab,
+                    transform=ax.get_xaxis_transform(), ha="center",
+                    va="bottom", fontsize=9, style="italic")
 
     ax.set_xlim(-0.8, nx - 0.2)
     if ylim is not None:
         ax.set_ylim(ylim)
     ax.set_ylabel("Energy (cm$^{-1}$)")
 
+    # right axis in eV, sharing the same data range
+    axr = ax.twinx()
+    axr.set_ylim(ax.get_ylim()[0] / EV, ax.get_ylim()[1] / EV)
+    axr.set_ylabel("Energy (eV)")
+
     from matplotlib.lines import Line2D
-    handles = [Line2D([0], [0], color="C0", lw=1.8, label=solid_label),
-               Line2D([0], [0], color="C3", lw=1.4, ls="--", label="observed (NIST)")]
+    handles = [Line2D([0], [0], color="C0", lw=1.6, label=solid_label),
+               Line2D([0], [0], color="C3", lw=1.2, ls="--",
+                      label="observed (NIST)")]
     ax.legend(handles=handles, frameon=False, fontsize=9, loc="upper left")
     fig.text(0.5, 0.01,
-             "Columns are terms (grouped by parity), ticks are J-levels. "
-             f"Solid = {solid_label}, dashed = observed (NIST). Per-level "
-             "energies and residuals are tabulated later.",
+             "One column per term; levels labelled by running orbital (red). "
+             f"Solid = {solid_label}, dashed = observed (NIST).",
              ha="center", fontsize=8, style="italic")
-    fig.tight_layout(rect=[0.04, 0.05, 1, 0.94])
+    fig.tight_layout(rect=[0.04, 0.04, 1, 0.94])
     pdf.savefig(fig); plt.close(fig)
 
 
@@ -373,7 +437,7 @@ def _dedup_levels1(fitted):
     return uniq
 
 
-def page_levels(pdf, species, matched, fitted=None, calc=None):
+def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None):
     """Centerpiece. When fitted data exist, both Grotrian pages share ONE panel
     set and ONE x-layout so paging gives a clean before/after:
       Page 1: ab initio (solid) + NIST (dashed)
@@ -389,20 +453,24 @@ def page_levels(pdf, species, matched, fitted=None, calc=None):
             for m in p["lev"]:
                 allE += [v for v in (m.get("E_calc"), m.get("E_obs"),
                                      m.get("E_fit")) if v is not None]
+        if ie_cm is not None:
+            allE.append(ie_cm)
         pad = 0.04 * (max(allE) - min(allE)) if allE else 1.0
-        ylim = (min(allE) - pad, max(allE) + pad) if allE else None
+        ylim = (min(min(allE), 0) - pad, max(allE) + pad) if allE else None
         _grotrian_page(pdf, species, panels, "E_calc",
                        "computed (ab initio)",
-                       "term diagram - ab initio vs observed", layout, ylim)
+                       "term diagram - ab initio vs observed", layout, ylim,
+                       ie_cm)
         _grotrian_page(pdf, species, panels, "E_fit", "fitted (RCE)",
-                       "term diagram - fitted vs observed", layout, ylim)
+                       "term diagram - fitted vs observed", layout, ylim, ie_cm)
         _page_level_table(pdf, species, panels)
     else:
         panels = _group_terms(matched)
         layout = _grotrian_layout(panels)
         _grotrian_page(pdf, species, panels, "E_calc",
                        "computed (ab initio)",
-                       "term diagram - ab initio vs observed", layout)
+                       "term diagram - ab initio vs observed", layout,
+                       ie_cm=ie_cm)
         _page_level_table_simple(pdf, species, panels)
 
 
@@ -529,12 +597,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--levels1", default=None,
                     help="RCE LEVELS1 output; if given, add fitted-vs-observed.")
+    ap.add_argument("--ie", default=None,
+                    help="ionization-energy table (species<TAB>IE_cm1).")
     ap.add_argument("--fit-rms", type=float, default=None)
     a = ap.parse_args()
 
     calc, lines = parse_outg11(a.outg11)
     nist = load_nist(a.nist)
     matched = match_levels(calc, nist)
+    ie_cm = load_ie(a.ie, a.species) if a.ie else None
 
     fitted = None
     unified = None
@@ -546,7 +617,7 @@ def main():
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
         page_summary(pdf, a.species, matched, lines, a.fit_rms)
-        page_levels(pdf, a.species, matched, fitted, calc)
+        page_levels(pdf, a.species, matched, fitted, calc, ie_cm)
         page_residuals(pdf, a.species, matched, unified)
         # gf-vs-wavelength page deferred: only meaningful once RCE produces many
         # lines and we have a reference (Kurucz/lab) gf to compare against.
