@@ -148,10 +148,10 @@ def fmt_flags(flags):
     return "".join(f"{f:10d}" for f in flags)
 
 
-def build(outgine_path, nist_levels, computed_terms, out_path):
+def build(outgine_path, nist_levels, computed_terms, out_path, free_ci_with=()):
     with open(outgine_path) as f:
         lines = f.readlines()
-    _build_focused(lines, nist_levels, computed_terms, out_path)
+    _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with)
 
 
 def _infer_block_parity(header_block_lines):
@@ -171,7 +171,7 @@ def _infer_block_parity(header_block_lines):
     return "o" if lsum % 2 else "e"
 
 
-def _build_focused(lines, nist_levels, computed_terms, out_path):
+def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()):
     """Walk blocks; within each, replace consecutive (value-line, flag-line)
     pairs (one per J, ascending from the block's minimum J) with observed
     levels. Each computed J-slot (energy-ordered) is matched to the observed
@@ -264,9 +264,11 @@ def _build_focused(lines, nist_levels, computed_terms, out_path):
                     if (_is_physical_param(name)
                             and not _is_eav_reference(name, L,
                                                       block_index == 0)):
-                        newcodes.append(0)        # free
+                        newcodes.append(0)        # free physical param
+                    elif _is_free_ci(name, free_ci_with):
+                        newcodes.append(0)        # free selected CI integral
                     else:
-                        newcodes.append(code)     # keep (fixed / CI)
+                        newcodes.append(code)     # keep (fixed)
                 # re-emit group-code lines, 7 per line (Format 7I10)
                 for k, gj in enumerate(gc_lines):
                     chunk = newcodes[k * 7:(k + 1) * 7]
@@ -306,6 +308,28 @@ def _is_physical_param(name):
     return bool(re.match(r"(EAV|ZETA|[FG]\d)", name))
 
 
+def _ci_configs(name):
+    """For a CI parameter name like '161D1122' or '120D1113', return the pair of
+    coupled configuration indices. The name is <c1><c2><k><D|E><....>: first two
+    digits are the 1-based config numbers, third is the multipole k. So
+    '161D1122' -> configs (1,6), '120D1113' -> (1,2). None if not a CI name."""
+    m = re.match(r"(\d)(\d)\d[DE]\d+$", name)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)))
+
+
+def _is_free_ci(name, free_ci_pairs):
+    """Free a configuration-interaction integral only if it couples one of the
+    specific config PAIRS in `free_ci_pairs` (a set of frozensets of 1-based
+    config indices). Targeting individual pairs (e.g. {1,6} = 3s^2-3p^2) avoids
+    the instability of freeing many correlated CI integrals at once."""
+    pair = _ci_configs(name)
+    if pair is None or not free_ci_pairs:
+        return False
+    return frozenset(pair) in free_ci_pairs
+
+
 def _is_eav_reference(name, L, is_first_block):
     """Hold ONLY the global ground-state EAV (first EAV of the first/even block)
     fixed as the energy zero. Every other block's EAV must be free, or its
@@ -320,11 +344,20 @@ def main():
     ap.add_argument("--outg11", required=True,
                     help="ab initio OUTG11, for per-slot term identities.")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--free-ci-pairs", default="",
+                    help="comma-separated config PAIRS (1-based, 'i-j') whose CI "
+                         "integral should be freed, e.g. '1-6' for 3s^2-3p^2. "
+                         "Target specific pairs to avoid over-freeing.")
     a = ap.parse_args()
+    free_ci = set()
+    for tok in a.free_ci_pairs.split(","):
+        tok = tok.strip()
+        if "-" in tok:
+            i, j = tok.split("-"); free_ci.add(frozenset((int(i), int(j))))
     nist = load_nist_levels(a.nist)
     cterms = load_computed_terms(a.outg11)
-    build(a.outgine, nist, cterms, a.out)
-    print(f"wrote {a.out}")
+    build(a.outgine, nist, cterms, a.out, free_ci)
+    print(f"wrote {a.out}  (free CI with configs {free_ci or 'none'})")
 
 
 if __name__ == "__main__":
