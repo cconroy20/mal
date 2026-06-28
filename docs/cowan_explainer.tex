@@ -262,6 +262,130 @@ uncertainties}, global optimization, and (our novel idea) folding the observed
 \emph{stellar spectrum} into the objective alongside the energy levels --- can
 make a genuine advance. See the project plan.
 
+\section{What the least-squares fit is actually doing}
+\label{sec:fitdetail}
+
+Section~\ref{sec:rce} sketched the fit; because it is the core of this project,
+here we spell out precisely what is varied, what the objective function is, how
+\prog{rce} solves it, and why fitting energies improves $gf$.
+
+\subsection{What is fit: a few radial parameters, not the levels or the $gf$}
+
+The adjustable quantities are a \emph{small} set of radial (Slater--Condon)
+parameters,
+\[
+  \mathbf{x} = \{\,\Eav^{(c)},\; \Fk(n\ell,n'\ell'),\; \Gk(n\ell,n'\ell'),\;
+  \znl,\; \Rk(\text{CI}),\,\dots\,\},
+\]
+one block per configuration $c$. For the Mg\,\textsc{i} odd block in our worked
+example the \emph{entire} free set was nine numbers: for each of $3s3p$, $3s4p$,
+$3s5p$, the average energy $\Eav$, the spin--orbit parameter $\zeta_{p}$, and the
+exchange integral $G^{1}(3s,p)$. That is the whole fit --- not the hundreds of
+levels and not the thousands of $gf$-values, but a handful of physically
+meaningful integrals.
+
+This works because of the radial/angular separation (\S\ref{sec:rcg}): every
+Hamiltonian matrix element is
+\[
+  \langle \gamma' | H | \gamma\rangle
+  = \sum_{p} \; c^{\,p}_{\gamma'\gamma}\; x_p ,
+\]
+a sum of \textbf{fixed} angular coefficients $c^{\,p}_{\gamma'\gamma}$ (exact
+Racah/Wigner algebra, computed once by \prog{rcg}) times the \textbf{adjustable}
+radial parameters $x_p$. All of the model's freedom --- and all of its error ---
+lives in the few numbers $\mathbf{x}$. Diagonalizing $H(\mathbf{x})$ for each
+total angular momentum $J$ yields the computed level energies (eigenvalues)
+$E_i^{\mathrm{calc}}(\mathbf{x})$ and the level compositions (eigenvectors)
+$\mathbf{v}_i(\mathbf{x})$.
+
+\subsection{The objective function}
+
+\prog{rce} minimizes the sum of squared differences between the computed levels
+and the \emph{observed} (NIST/laboratory) levels supplied as input:
+\begin{equation}
+  \chi^2(\mathbf{x}) \;=\; \sum_{i\,\in\,\text{included}}
+  \big[\, E_i^{\mathrm{calc}}(\mathbf{x}) - E_i^{\mathrm{obs}} \,\big]^2 .
+  \label{eq:chi2detail}
+\end{equation}
+Three things are worth emphasizing:
+\begin{itemize}[nosep]
+\item \textbf{The fit target is energy \emph{levels} only.} The $gf$-values never
+appear in \eqref{eq:chi2detail}. They are computed \emph{after} the fit, from the
+fitted eigenvectors.
+\item \textbf{It is unweighted} in standard \prog{rce}: a level is either included
+($\mathrm{NF}=+i$) or excluded ($\mathrm{NF}=-i$); there is no per-level
+$\sigma_i$. (Inverse-variance weighting is a planned modernization.)
+\item \textbf{The map $\mathbf{x}\!\to\!E^{\mathrm{calc}}$ is non-linear} ---
+each $E_i^{\mathrm{calc}}$ is an eigenvalue of a matrix that depends linearly on
+$\mathbf{x}$, but eigenvalues are non-linear functions of the matrix --- so the
+minimization must iterate.
+\end{itemize}
+
+\subsection{The optimizer \prog{rce} actually uses}
+
+\prog{rce} solves \eqref{eq:chi2detail} by \textbf{iterated linearized
+least-squares (Gauss--Newton)} with a damping factor --- the classic 1970s
+recipe (TASS \S16-3 to 16-5), unchanged since. Each cycle:
+\begin{enumerate}[nosep]
+\item Build $H(\mathbf{x})$ from the current parameters and diagonalize it
+(Householder reduction \textsc{tred2} + \textsc{tql}) to get
+$E_i^{\mathrm{calc}}$ and eigenvectors $\mathbf{v}_i$ (routine \textsc{eigen}).
+\item Form the \textbf{Jacobian} $V_{ip}=\partial E_i^{\mathrm{calc}}/\partial x_p$
+(routine \textsc{calcv}). Because $E_i$ is an eigenvalue, the
+Hellmann--Feynman theorem gives this derivative for free as the expectation value
+of $\partial H/\partial x_p$ in the state $\mathbf{v}_i$ --- and since $H$ is
+linear in $\mathbf{x}$, $\partial H/\partial x_p$ is just the matrix of angular
+coefficients $c^{\,p}$. So $V_{ip} = \mathbf{v}_i^{\!\top} c^{\,p}\, \mathbf{v}_i$.
+\item Solve the \textbf{normal equations} for the parameter step
+$\Delta\mathbf{x}$ (routines \textsc{calcx}, \textsc{lss}):
+\begin{equation}
+  B\,\Delta\mathbf{x} = V^{\!\top}\,\big(\mathbf{T}-\mathbf{W}\big),
+  \qquad B = V^{\!\top}V,
+  \label{eq:normal}
+\end{equation}
+where $\mathbf{T}$ are the observed and $\mathbf{W}$ the current computed levels.
+A damping/step-control factor (printed as \texttt{F} and \texttt{G} in the
+output) scales $\Delta\mathbf{x}$ to keep the linearized step stable.
+\item Update $\mathbf{x}\!\leftarrow\!\mathbf{x}+\Delta\mathbf{x}$ and repeat
+until the parameters stop changing (by $<0.03$ in their units) or a cycle cap is
+reached. Levels may be re-associated with eigenvalues between cycles
+(\textsc{order}).
+\end{enumerate}
+There is \textbf{no regularization, no priors, no global search, and no
+uncertainty propagation} --- $B=V^{\!\top}V$ is formed and inverted directly. When
+parameters are strongly correlated (common for open shells) $B$ is nearly
+singular and the bare Gauss--Newton step is unstable; the standard workaround is
+the hand-tuned ``black magic'' of fixing or ratio-linking parameters
+(\S\ref{sec:rce}). This is exactly the stage the project aims to modernize
+(ridge/Bayesian regularization, MCMC posteriors $\Rightarrow$ per-line $gf$
+uncertainties, and folding a stellar spectrum into the objective).
+
+\subsection{Why fitting energies improves the $gf$}
+
+The diagonalization returns eigenvalues \emph{and} eigenvectors. Fitting
+$\mathbf{x}$ to the observed energies moves the eigenvalues onto experiment ---
+but it simultaneously changes the eigenvectors, i.e.\ the LS composition (level
+mixing) of each state. The oscillator strength is built from those eigenvectors,
+\[
+  gf \;\propto\; \sigma\,\big|\langle \beta' J' \,\|\,\mathbf{P}^{(1)}\,\|\,
+  \beta J\rangle\big|^2,
+  \qquad
+  \langle\,\|\mathbf{P}^{(1)}\|\,\rangle
+  = \mathbf{v}_{\beta'J'}^{\!\top}\, \mathsf{P}\, \mathbf{v}_{\beta J},
+\]
+where $\mathsf{P}$ holds the \prog{rcn2} transition integrals. So
+\emph{better energies $\Rightarrow$ better eigenvectors $\Rightarrow$ better
+$gf$}, even though $gf$ was never in the objective. The implicit assumption ---
+the central bet of the semi-empirical method --- is that a model reproducing the
+observed level structure also has trustworthy wavefunctions.
+
+In the Mg\,\textsc{i} example, fitting $G^1(3s,3p)$ from $27.89\to21.92$ (a factor
+$0.79$, the expected Slater reduction) slid the $^1P^\circ$ level onto its
+observed energy \emph{and} re-mixed the singlet/triplet eigenvectors; that
+re-mixing is what gives the $4571$\,\AA{} $^3P^\circ\!\to{}^1S$ intercombination
+line any strength at all, and shifts the resonance-line $gf$. One number, fit to
+energies, set the strengths of several lines through the shared eigenvectors.
+
 \section{Mapping to the actual code and files}
 
 \begin{table}[h]
