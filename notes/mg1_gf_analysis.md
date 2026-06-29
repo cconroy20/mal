@@ -211,3 +211,27 @@ ground-state CI depression is fixed.
 
 NEXT: extract Bob's HF scale factors, or free the dominant CI integrals on the
 full basis and re-fit; compare gf to Bob.
+
+## Tested: a single global scale factor (Bob's insight, simplified) -- doesn't work
+
+Idea: replicate Bob's per-parameter FIXEDHF scale factors with ONE (or two)
+global scale(s) on the frozen integrals, fit alongside EAVs. Tested cheaply by
+scaling ab-initio integrals directly + re-running RCG (no optimizer needed):
+
+  CI (R^k) global scale s:   3s2->3s3p 3P gap = 20376 (s=1) -> 19115 (s=0.80)
+     [obs 21850] -- scaling CI DOWN moves the gap the WRONG way.
+  Slater (F/G) global scale: 3P gap 20376->19613, 1P gap 35895->37742 as s:1->1.15
+     [obs 21850 / 35051] -- 3P and 1P want OPPOSITE corrections; one scale can't.
+
+At ab-initio the singlet-triplet SPLITTING (1P-3P, set by 3s3p G^1 exchange) is
+already too large; a global scale moving F and G together can't shrink just the
+exchange. Confirmed against our SUCCESSFUL 9-config fit: the params that moved
+went in BOTH directions by very different amounts -- 3s5s-3p2 CI +274%, but
+3s2-3p2 CI -59%; 3s3p G^1-type down 55%. A single (or two) global scale(s)
+cannot reproduce that.
+
+CONCLUSION: Bob's insight is genuinely PER-INTEGRAL, not a global screening
+factor -- the HF errors point different ways for different integrals. The path
+the evidence supports on the full basis = SELECTIVE freeing (Bob-style): EAVs +
+a few low-config Slater (esp. 3s3p G^1) + the dominant CI (esp. 3s2-3p2, which
+our 9-config fit cut 59%), ridge prior holding the rest at HF. NOT global scaling.
