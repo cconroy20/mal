@@ -439,3 +439,41 @@ PER-INTEGRAL HF SCALE FIDELITY. NEXT: read Bob's exact per-integral scale (and
 his fitted G^k) from c1200*.log and transcribe them onto our integrals (he gives
 fitted_value, HF_value, and scale per line), rather than a flat per-family scale.
 That is the difference between "Bob-style" and "Bob's actual numbers".
+
+## Transcription test: it's the frozen CI STRUCTURE, not single scales or G^1
+
+Compared our HF integrals to Bob's directly (from c1200*.log). 3s3p G^1(12):
+our HF 27885 cm^-1 vs Bob HF 29818 (6% -- different HF codes, minor); Bob FREED
+and fit it to 23423 (0.785xHF). Tested setting our 3s3p G^1 to Bob's exact 23423:
+gf moved only 0.212->0.205. The worst lines (3s2->3s4p 1P d=-0.53, 3s4d 1D->3s3p
+1P d=-0.50) DID NOT improve. So it is NOT the 3s3p exchange value.
+
+Also found: our scaled-fit barely moves G^1 from the scaled-HF prior center
+(22308->22285), even though it's in the free set with sigma=0.30 that would
+ALLOW the move -- because the gf targets that constrain those singlet lines
+aren't pulling it (the data signal is weak/absent in our objective for the 1D/1P
+Rydberg mixing).
+
+FINAL SCORECARD (strong+A/B gf RMS):
+  ab-initio raw HF        0.178
+  full-basis fit raw      0.220
+  full-basis fit scaled   0.212
+  our 9-config fit        0.063   <- still best, on its 7-line subset
+
+DIAGNOSIS (settled): the persistent ~0.5 dex on singlet 3s.nd 1D->3s3p 1P and
+3s2->3s4p 1P comes from the 1D/1P EIGENVECTOR MIXING (3s.nd / 3s.np Rydberg with
+3p^2/3d^2), which is set by the FROZEN CI (R^k) STRUCTURE. Bob gets these right
+(~0.13 dex) with his per-integral frozen CI; our uniform-scaled CI doesn't
+reproduce that mixing, and freezing CI means the fit can't fix it. Our 9-config
+win was precisely because it FREED the 3s2-3p2 / 3s.ns-3p2 CI (small-basis crutch)
+-- which reshaped exactly this mixing.
+
+STRATEGIC CONCLUSION: to match Bob we need his EXACT per-integral frozen CI
+values (5567 of them), transcribed from c1200*.log -- a large, fragile parse
+(config inheritance, no names on CI lines) with uncertain payoff -- OR we accept
+that for OUR engine, selectively FREEING the key low CI integrals (3s2-3p2,
+3s2-3s.nd, 3p2-3s.nd) is the pragmatic lever (it worked at 9 configs and directly
+targets the 1D/1P mixing), even though Bob freezes them. The ruleset's
+"never free CI" is right for BOB (his CI values are curated); for us, freeing the
+FEW dominant low-l CI integrals is the equivalent of his curation. This is the
+real, generalizable lesson: free what you can't otherwise get right.
