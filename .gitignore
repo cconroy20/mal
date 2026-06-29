@@ -36,3 +36,7 @@ work/mg1/*
 # Bob Kurucz reference decks/outputs fetched from kurucz.harvard.edu/atoms
 # (large; fetch with tools/fetch_kurucz_ref.sh rather than committing)
 kurucz_ref/
+
+# Full-basis Mg I run outputs (regenerate with work/run_mg1_full.sh; in36 via
+# tools/gen_in36.py)
+work/mg1_full/
