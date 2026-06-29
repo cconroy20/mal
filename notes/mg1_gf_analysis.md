@@ -355,3 +355,28 @@ the FROZEN background must be scaled first. The two are inseparable: completenes
 + correct free set + scaled-HF frozen background. NEXT: apply a per-integral (or
 uniform ~0.85 CI/Slater) HF scale to the OUTGINE before --ruleset + RCE; extract
 Bob's actual scales from b*.log/hf*.dat for the per-integral version.
+
+## Full-basis RCE instability ROOT CAUSE: build_ine20 multi-line J-block bug
+
+The full-basis ruleset RCE oscillated (AVDEV ~5 kK) NOT because of the HF scale --
+it's a build_ine20 level-SUBSTITUTION bug on large J-blocks. A single (parity,J)
+block in the 122-config OUTGINE has MANY value lines (e.g. J=0 even: ~90 computed
+T-values across lines 479-491) followed by MULTIPLE flag lines (492-494...). The
+value/flag substitution loop assumes ONE value line + ONE flag line per J, does
+j+=2, Jval+=1 -- so after the first line it treats each continuation value line
+as a new J and mis-substitutes. Result: unmatched high-energy computed values
+(~130 kK) get POSITIVE include-flags -> RCE told to fit levels to 130000 cm^-1 ->
+AVDEV ~5 kK, oscillating. (Confirmed: INE20 value/flag pairs past the first show
+129-131 kK values all flagged positive.)
+
+This is the SAME class as the eigenvector-chunk and group-code bugs: the 9-config
+layout is one-line-per-J, the 122-config layout wraps, and the parser assumed the
+small layout. FIX NEEDED: rewrite the value/flag substitution to gather ALL value
+lines for a J then ALL flag lines, substitute across the full set, before moving
+to the next J. (HF-scale question is downstream of this -- can't judge the fit
+until the targets are correct.)
+
+Good piece kept: build_ine20 --max-energy <cm^-1> caps the fit to the bound
+spectrum (our NIST cache carries 90+ autoionizing/high-Rydberg levels above the
+IE that shouldn't be fit over an incomplete basis). Verified: 284 -> 204 levels
+below the Mg I IE. Necessary but not sufficient -- the J-block bug dominates.

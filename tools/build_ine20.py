@@ -59,9 +59,13 @@ def _cfgkey(config):
     return ".".join(norm[-2:]) if norm else config.strip()
 
 
-def load_nist_levels(path):
+def load_nist_levels(path, max_E=None):
     """Return dict (parity, Jstr) -> list of dicts {E_kK, cfgk, tk} for observed
-    (non-predicted) levels, keeping config and term so we can match by identity."""
+    (non-predicted) levels, keeping config and term so we can match by identity.
+    `max_E` (cm^-1) drops levels above an energy ceiling -- use the ionization
+    limit to fit only the BOUND spectrum (Bob fits a curated low set; our NIST
+    cache also carries hundreds of high-Rydberg/autoionizing levels that, fit
+    over an incomplete basis, make RCE thrash)."""
     table = {}
     with open(path) as f:
         for ln in f:
@@ -75,7 +79,7 @@ def load_nist_levels(path):
                 Jf = float(J); E = float(level)
             except ValueError:
                 continue
-            if pred == "1":
+            if pred == "1" or (max_E is not None and E > max_E):
                 continue
             table.setdefault((parity, "%g" % Jf), []).append(
                 {"E": E / KK, "cfgk": _cfgkey(config), "tk": _termkey(term)})
@@ -539,6 +543,10 @@ def main():
     ap.add_argument("--ion", action="store_true",
                     help="this species is an ION (charge>0); enables Trees BETA "
                          "freeing per the ruleset. Default: neutral.")
+    ap.add_argument("--max-energy", type=float, default=None,
+                    help="fit only observed levels below this energy (cm^-1), "
+                         "e.g. the ionization limit, to exclude high-Rydberg / "
+                         "autoionizing levels that make the fit thrash.")
     a = ap.parse_args()
     free_ci = set()
     for tok in a.free_ci_pairs.split(","):
@@ -551,8 +559,11 @@ def main():
         if ":" in tok:
             cfg, prm = tok.split(":", 1)
             freeze.add((cfg.strip(), prm.strip()))
-    nist = load_nist_levels(a.nist)
+    nist = load_nist_levels(a.nist, max_E=a.max_energy)
     cterms = load_computed_terms(a.outg11)
+    if a.max_energy is not None:
+        print(f"  fitting {sum(len(v) for v in nist.values())} observed levels "
+              f"below {a.max_energy:.0f} cm^-1")
     ruleset = None
     if a.ruleset:
         observed = {d["cfgk"] for v in nist.values() for d in v}
