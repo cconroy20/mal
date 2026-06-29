@@ -125,18 +125,21 @@ def is_flag_line(line):
 
 
 def _is_groupcode_line(line):
-    """The parameter-group-code lines are INTEGER lines whose entries are large
-    in magnitude (|code| >= 100). Per-level flag lines are small sequential
-    integers (1,2,3,...); value/eigenvalue lines are floats. Exclude any line
-    containing a decimal point (a float line like '129.5661 ...' has integers
-    >=100 in its digits but is NOT a group-code line)."""
+    """A parameter-group-code line: a PURE-INTEGER line (no letters/parens/dots)
+    whose every entry is a TIE-GROUP CODE -- 0 or a multiple of 100 (+100 = an
+    adjustable parameter, -100 = fixed; larger multiples tie params together).
+    This is the exact, general RCG/OUTGINE convention (verified on the 9- and
+    122-config Mg I decks), and it cleanly excludes the three lookalikes that
+    broke earlier heuristics: float value/eigenvalue lines (have '.'),
+    parameter-NAME lines containing CI names like '120D1114' (have letters),
+    and sequential per-level index lines '99 100 101 102' (not all mult-of-100)."""
     s = line.rstrip("\n")
-    if "." in s:
+    if not s.strip() or re.search(r"[A-Za-z().]", s):
         return False
     ints = re.findall(r"-?\d+", s)
     if not ints:
         return False
-    return any(abs(int(x)) >= 100 for x in ints)
+    return all(int(x) % 100 == 0 for x in ints)
 
 
 def _is_level_flag_line(line):
@@ -160,8 +163,8 @@ def build(outgine_path, nist_levels, computed_terms, out_path, free_ci_with=(),
           freeze=(), ruleset=None):
     with open(outgine_path) as f:
         lines = f.readlines()
-    _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with,
-                   freeze, ruleset)
+    return _build_focused(lines, nist_levels, computed_terms, out_path,
+                          free_ci_with, freeze, ruleset)
 
 
 def _infer_block_parity(header_block_lines):
@@ -204,6 +207,7 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
     n = len(lines)
     i = 0
     block_index = 0
+    freed_tally = __import__("collections").Counter()
 
     def is_block_header(k):
         # A genuine block header (7 ints) is immediately followed by a line of
@@ -267,20 +271,34 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
                 j += 2
                 Jval += 1.0
             # --- free the physical parameters: rewrite the group-code block ---
-            # The group codes immediately follow the J-blocks (lines of +-100..).
-            # Parameter NAMES live in the header lines (after the config-names
-            # line). We free single-configuration physical parameters (EAV,
-            # ZETA, F^k, G^k) by setting their code 100 -> 0, and keep the
-            # configuration-interaction parameters (names like '120D1212') fixed.
+            # The group-code run (lines of 0/+-100..) is the next CONTIGUOUS run
+            # of group-code lines; on large bases it is NOT immediately after the
+            # J-blocks (more J value/index lines intervene when a J has many
+            # levels), so scan forward to it rather than assuming adjacency. We
+            # must not cross into the NEXT parity block, so stop at its header.
             pnames, pcfgs = _parse_param_names(hdr)
-            gc_start = j
+            scan = j
+            while scan < n and not _is_groupcode_line(lines[scan]) \
+                    and not is_block_header(scan):
+                scan += 1
             gc_lines = []
-            while j < n and _is_groupcode_line(lines[j]):
-                gc_lines.append(j); j += 1
+            while scan < n and _is_groupcode_line(lines[scan]):
+                gc_lines.append(scan); scan += 1
+            j = scan
             if gc_lines and pnames:
                 codes = []
                 for gj in gc_lines:
                     codes.extend(int(x) for x in re.findall(r"-?\d+", lines[gj]))
+                # INVARIANT: the group-code run must align 1:1 with the parameter-
+                # name list (name[L] <-> code[L]). If these ever diverge, the
+                # free/freeze decisions would be applied to the wrong parameters
+                # -- a silent, dangerous failure. Refuse rather than mis-fit.
+                if len(codes) != len(pnames):
+                    raise ValueError(
+                        f"OUTGINE block {block_index}: {len(pnames)} parameter "
+                        f"names but {len(codes)} group codes -- name<->code "
+                        f"misalignment; the parser would free the wrong params. "
+                        f"(Check _parse_param_names / _is_groupcode_line.)")
                 borbs = _block_orbitals(hdr) if ruleset else None
                 newcodes = []
                 for L, code in enumerate(codes):
@@ -297,6 +315,8 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
                                                   ruleset["open_ls"],
                                                   ruleset["is_ion"], borbs))
                         newcodes.append(0 if free else code)
+                        if free:
+                            freed_tally[_param_family(name)] += 1
                     elif (_is_physical_param(name) and not is_ref
                             and not _is_frozen(name, cfg, freeze)):
                         newcodes.append(0)        # free physical param
@@ -314,6 +334,7 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
             i += 1
     with open(out_path, "w") as f:
         f.writelines(out)
+    return dict(freed_tally)
 
 
 def _parse_param_names(hdr_lines):
@@ -356,6 +377,22 @@ def _is_physical_param(name):
 # parameter family, shell-aware. Everything else stays FIXED (group code kept) and
 # is held at scaled HF by the prior. Off-diagonal CI (R^k) is NEVER freed here.
 _FG = re.compile(r"([FG])(\d)\((\d)(\d)\)")
+
+
+def _param_family(name):
+    """Coarse family of a single-config parameter name, for free-tally reporting."""
+    nm = name.strip()
+    if nm.startswith("EAV"):
+        return "EAV"
+    if nm.startswith("ZETA"):
+        return "ZETA"
+    if nm.startswith("ALPHA") or nm.startswith("BETA"):
+        return "ALPHA/BETA"
+    if re.match(r"F\d", nm):
+        return "F^k"
+    if re.match(r"G\d", nm):
+        return "G^k"
+    return "other"
 
 
 def _orbital_l(config, idx, block_orbitals):
@@ -524,10 +561,12 @@ def main():
                    "is_ion": a.ion}
         print(f"  ruleset: ground={gcfg!r} open_shells={open_ls or 'closed'} "
               f"ion={a.ion}  observed_configs={len(observed)}")
-    build(a.outgine, nist, cterms, a.out, free_ci, freeze, ruleset)
+    tally = build(a.outgine, nist, cterms, a.out, free_ci, freeze, ruleset)
     print(f"wrote {a.out}  (free CI with configs {free_ci or 'none'}; "
           f"frozen params {freeze or 'none'}; "
           f"ruleset={'on' if ruleset else 'off'})")
+    if tally:
+        print(f"  freed by family: {tally}  (total {sum(tally.values())})")
 
 
 if __name__ == "__main__":
