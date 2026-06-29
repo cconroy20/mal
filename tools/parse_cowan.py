@@ -53,24 +53,40 @@ def parse_outg11(path):
     return _parse_levels(text), _parse_lines(text)
 
 
+# A basis row inside an EIGENVECTORS block:
+#   "  <rownum>: <config>  (<parent>)<term>  <k>  c1 c2 ... cM"
+# <rownum> = position in the printed list (can repeat across J-blocks),
+# <k>      = the basis-state index, STABLE across the column-chunks of one block,
+# c1..cM   = this basis state's coefficients in the eigenvectors of THIS chunk.
+_BASIS_ROW = re.compile(
+    r"^\s*\d+:\s+(\S+)\s+\((.*?)\)\s*(\d[A-Z]\*?)\s+(\d+)\s+(.*\S)\s*$")
+# A column-chunk header: leading spaces, a lone chunk number, then config tokens.
+_CHUNK_HDR = re.compile(r"^\s+\d+\s+[1-9][spdfghiklm]")
+_NUM = re.compile(r"-?\d+\.\d+")
+
+
 def parse_compositions(path):
     """Parse OUTG11's EIGENVALUES + EIGENVECTORS(LS) blocks and assign each
     computed level a ROBUST identity = the dominant basis state (config, term),
-    i.e. the basis row with the largest |coefficient| in that level's column.
+    i.e. the basis row with the largest |coefficient| in that eigenvalue's column.
 
     Returns dict (parity, Jstr) -> list (energy-ordered) of dicts
         {E_calc (cm^-1), config, term, parity}.
 
-    The block layout (see OUTG11):
-        0  EIGENVALUES   (J= x.x)
-                          <e1> <e2> ...                (kK)
-           ...
-           EIGENVECTORS (    LS COUPLING)
-                          <colhdr configs...>
-                          <colhdr (parent)terms...>
-          R: <config> (parent)<term>  k  c1 c2 ...     (one row per basis state)
-    Column k holds the composition of eigenvalue k; the basis label of the row
-    with max |c| is that level's dominant identity.
+    The eigenvector matrix is printed in COLUMN-CHUNKS (~11 eigenvectors wide):
+        EIGENVECTORS ( LS COUPLING)
+          <chunk#>   <cfg> <cfg> ...        <- chunk header (column configs)
+                     (parent)term ...       <- column parent-terms
+          R: cfg (parent)term  k  c1 .. c11 <- one row per basis state, THIS chunk
+          ...
+          <chunk#>   <cfg> ...              <- next chunk: eigenvectors 12..22
+          R: cfg (parent)term  k  c12 .. c22
+          ...
+        PURITY=...                          <- end of LS block
+    Each basis state (keyed by k) recurs once per chunk; we concatenate its
+    per-chunk coefficients into its full eigenvector row, then take, for every
+    eigenvalue column, the basis state with the largest |coefficient|. Handles a
+    single chunk (small bases) and many chunks (large bases) identically.
     """
     with open(path, errors="replace") as f:
         lines = f.readlines()
@@ -82,7 +98,7 @@ def parse_compositions(path):
             i += 1
             continue
         Jval = "%g" % float(m.group(1))
-        # eigenvalues on following non-blank numeric lines
+        # --- eigenvalues: numeric lines until the eigenvector/other section ---
         evs = []
         j = i + 1
         while j < n and not lines[j].strip():
@@ -91,13 +107,13 @@ def parse_compositions(path):
             s = lines[j]
             if any(t in s for t in ("CONFIG. NO.", "EIGENVECTORS", "G-VALUES")):
                 break
-            nums = re.findall(r"-?\d+\.\d+", s)
+            nums = _NUM.findall(s)
             if nums:
                 evs.extend(float(x) for x in nums)
             elif s.strip() == "" and evs:
                 break
             j += 1
-        # find the LS eigenvector block
+        # --- locate the LS eigenvector block ---
         while j < n and not ("EIGENVECTORS" in lines[j] and "LS" in lines[j]):
             if re.search(r"EIGENVALUES\s*\(J=", lines[j]):
                 break
@@ -105,34 +121,48 @@ def parse_compositions(path):
         if j >= n or "EIGENVECTORS" not in lines[j]:
             i = j
             continue
-        # parse basis rows: "  R: <config> (parent)<term>  k  c1 c2 ..."
-        rows = []          # (config, term, [coeffs])
+        # --- read column-chunks, concatenating each basis state's coefficients ---
+        # coeffs[k] = full list of this basis state's eigenvector coefficients
+        # (across all chunks); label[k] = (config, term). col_base tracks how many
+        # eigenvector columns precede the current chunk.
+        coeffs, label = {}, {}
+        col_base = 0
+        chunk_width = 0          # columns seen in the current chunk
         k = j + 1
         while k < n:
             s = lines[k].rstrip("\n")
-            mr = re.match(
-                r"\s*\d+:\s+(\S+)\s+\(.*?\)\s*(\d[A-Z]\*?)\s+\d+\s+(.*)$", s)
-            if mr:
-                coeffs = [float(x) for x in re.findall(r"-?\d+\.\d+", mr.group(3))]
-                rows.append((mr.group(1), mr.group(2), coeffs))
-            elif "PURITY" in s or re.search(r"EIGENVECTORS|EIGENVALUES", s):
+            if "PURITY" in s or re.search(r"EIGENVALUES\s*\(J=", s) \
+                    or ("EIGENVECTORS" in s and "JJ" in s):
                 break
+            mr = _BASIS_ROW.match(s)
+            if mr:
+                cfg, term, bk = mr.group(1), mr.group(3), int(mr.group(4))
+                cs = [float(x) for x in _NUM.findall(mr.group(5))]
+                row = coeffs.setdefault(bk, [])
+                # pad to the chunk's starting column, then append this chunk's cs
+                if len(row) < col_base:
+                    row.extend([0.0] * (col_base - len(row)))
+                row.extend(cs)
+                label[bk] = (cfg, term)
+                chunk_width = max(chunk_width, len(cs))
+            elif _CHUNK_HDR.match(s):
+                # new chunk: advance the column base by the previous chunk width
+                col_base += chunk_width
+                chunk_width = 0
             k += 1
-        # assign each eigenvalue its dominant basis (config, term)
-        parity = None
+        # --- dominant basis state per eigenvalue column ---
         levs = []
         for col, E in enumerate(evs):
             best, bestc = None, -1.0
-            for (cfg, term, coeffs) in rows:
-                if col < len(coeffs) and abs(coeffs[col]) > bestc:
-                    bestc = abs(coeffs[col]); best = (cfg, term)
+            for bk, cs in coeffs.items():
+                if col < len(cs) and abs(cs[col]) > bestc:
+                    bestc = abs(cs[col]); best = label[bk]
             if best:
-                par = _parity_from_config(best[0])
                 levs.append({"E_calc": E * KK, "config": best[0],
-                             "term": best[1], "parity": par})
+                             "term": best[1],
+                             "parity": _parity_from_config(best[0])})
         if levs:
-            par = levs[0]["parity"]
-            out.setdefault((par, Jval), []).extend(levs)
+            out.setdefault((levs[0]["parity"], Jval), []).extend(levs)
         i = k
     for key in out:
         out[key].sort(key=lambda d: d["E_calc"])
@@ -340,3 +370,12 @@ if __name__ == "__main__":
     for d in ln[:10]:
         print(f"  lam={d['lambda_A']:10.3f}  loggf={d['loggf']:+.3f}  "
               f"up={d['term_up']}")
+    # eigenvector-composition identities (the robust labels); the lowest few are
+    # an easy correctness spot-check -- the ground state must be physical, NOT
+    # mislabelled (a multi-chunk parsing bug used to call it e.g. '3p4p').
+    comp = parse_compositions(sys.argv[1])
+    flat = sorted((L["E_calc"], L["config"], L["term"], J)
+                  for (p, J), v in comp.items() for L in v)
+    print(f"compositions: {len(flat)} levels; lowest 8 by energy:")
+    for E, c, t, J in flat[:8]:
+        print(f"  E={E:11.1f}  J={J:4s}  {c:10s} {t}")
