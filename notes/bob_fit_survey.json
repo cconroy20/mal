@@ -1,0 +1,459 @@
+[
+ {
+  "xxyy": "1100",
+  "logs": [
+   "c1100ey.log",
+   "c1100oy.log"
+  ],
+  "free": {
+   "EAV": 38,
+   "F^k(direct)": 1,
+   "G^k(exchange)": 9,
+   "ZETA": 6
+  },
+  "fixed": {
+   "EAV": 30,
+   "ZETA": 108,
+   "F^k(direct)": 74,
+   "G^k(exchange)": 179,
+   "ALPHA/BETA": 3
+  },
+  "header": {
+   "npar": 2646,
+   "nj": 6,
+   "firstj": "0.5",
+   "ground_occ": "1 p 6 s 1 p 0 d 0 s 0 d 0 p 0 s 0"
+  },
+  "n_free": 54,
+  "n_fixed": 394,
+  "free_names": {
+   "EAV": 38,
+   "G1(12)": 4,
+   "ZETA5": 4,
+   "F2(13)": 1,
+   "G0(13)": 1,
+   "G2(13)": 1,
+   "G1(23)": 1,
+   "G1(27)": 1,
+   "ZETA3": 1,
+   "G0(27)": 1,
+   "ZETA1": 1
+  }
+ },
+ {
+  "xxyy": "1300",
+  "logs": [
+   "c1300e.log",
+   "c1300o.log"
+  ],
+  "free": {
+   "EAV": 62,
+   "F^k(direct)": 3,
+   "G^k(exchange)": 7,
+   "ZETA": 2
+  },
+  "fixed": {
+   "EAV": 60,
+   "F^k(direct)": 102,
+   "ALPHA/BETA": 57,
+   "ZETA": 158,
+   "G^k(exchange)": 124
+  },
+  "header": {
+   "npar": 2561,
+   "nj": 9,
+   "firstj": "0.5",
+   "ground_occ": "1 s 2 p 0 s 1 d 0 g 0 i 0 p 0 f 0"
+  },
+  "n_free": 74,
+  "n_fixed": 501,
+  "free_names": {
+   "EAV": 62,
+   "F2(27)": 2,
+   "G1(17)": 2,
+   "F2(22)": 1,
+   "G1(12)": 1,
+   "G0(27)": 1,
+   "ZETA2": 1,
+   "ZETA3": 1,
+   "G2(18)": 1,
+   "G1(28)": 1,
+   "G3(28)": 1
+  }
+ },
+ {
+  "xxyy": "2001",
+  "logs": [
+   "c2001ey.log",
+   "c2001oy.log"
+  ],
+  "free": {
+   "EAV": 51,
+   "ZETA": 26
+  },
+  "fixed": {
+   "EAV": 51,
+   "ZETA": 137,
+   "F^k(direct)": 110,
+   "G^k(exchange)": 265,
+   "ALPHA/BETA": 3
+  },
+  "header": {
+   "npar": 2893,
+   "nj": 8,
+   "firstj": "0.5",
+   "ground_occ": "1 p 6 d 0 s 1 p 0 s 0 d 0 p 0 f 0"
+  },
+  "n_free": 77,
+  "n_fixed": 566,
+  "free_names": {
+   "EAV": 51,
+   "ZETA6": 13,
+   "ZETA5": 10,
+   "ZETA2": 1,
+   "ZETA4": 1,
+   "ZETA1": 1
+  }
+ },
+ {
+  "xxyy": "1200",
+  "logs": [
+   "c1200ez.log",
+   "c1200oz.log"
+  ],
+  "free": {
+   "EAV": 112,
+   "F^k(direct)": 2,
+   "ZETA": 14,
+   "G^k(exchange)": 16
+  },
+  "fixed": {
+   "G^k(exchange)": 122,
+   "ZETA": 113,
+   "ALPHA/BETA": 1,
+   "F^k(direct)": 17,
+   "EAV": 10
+  },
+  "header": {
+   "npar": 1340,
+   "nj": 10,
+   "firstj": "0.0",
+   "ground_occ": "1 s 2 p 0 s 0 d 0 g 0 i 0 l 0 p 0"
+  },
+  "n_free": 144,
+  "n_fixed": 263,
+  "free_names": {
+   "EAV": 112,
+   "ZETA3": 12,
+   "G1(13)": 12,
+   "ZETA2": 2,
+   "G1(27)": 2,
+   "F2(22)": 1,
+   "G1(12)": 1,
+   "F2(28)": 1,
+   "G1(28)": 1
+  }
+ },
+ {
+  "xxyy": "1400",
+  "logs": [
+   "c1400e.log",
+   "c1400o.log"
+  ],
+  "free": {
+   "EAV": 36,
+   "F^k(direct)": 18,
+   "ALPHA/BETA": 2,
+   "ZETA": 17,
+   "G^k(exchange)": 19
+  },
+  "fixed": {
+   "ZETA": 203,
+   "G^k(exchange)": 253,
+   "F^k(direct)": 156,
+   "EAV": 86,
+   "ALPHA/BETA": 74
+  },
+  "header": {
+   "npar": 2523,
+   "nj": 11,
+   "firstj": "0.0",
+   "ground_occ": "1 s 2 p 2 p 0 f 0 h 0 k 0 s 0 d 0"
+  },
+  "n_free": 92,
+  "n_fixed": 772,
+  "free_names": {
+   "EAV": 36,
+   "ZETA2": 17,
+   "F2(24)": 7,
+   "G1(23)": 6,
+   "F2(25)": 5,
+   "G0(23)": 4,
+   "G2(24)": 4,
+   "F2(23)": 3,
+   "G1(24)": 3,
+   "F2(22)": 2,
+   "ALPHA": 2,
+   "G2(23)": 1,
+   "F2(26)": 1,
+   "G1(12)": 1
+  }
+ },
+ {
+  "xxyy": "2000",
+  "logs": [
+   "c2000e.log",
+   "c2000o.log"
+  ],
+  "free": {
+   "EAV": 103,
+   "G^k(exchange)": 23,
+   "ZETA": 7,
+   "F^k(direct)": 8
+  },
+  "fixed": {
+   "G^k(exchange)": 181,
+   "EAV": 19,
+   "ZETA": 157,
+   "F^k(direct)": 80,
+   "ALPHA/BETA": 3
+  },
+  "header": {
+   "npar": 2935,
+   "nj": 10,
+   "firstj": "0.0",
+   "ground_occ": "1 d 0 s 2 p 0 s 0 d 0 g 0 i 0 p 0"
+  },
+  "n_free": 141,
+  "n_fixed": 440,
+  "free_names": {
+   "EAV": 103,
+   "G3(25)": 7,
+   "G0(24)": 5,
+   "F2(15)": 4,
+   "G0(15)": 4,
+   "ZETA1": 3,
+   "ZETA3": 3,
+   "G2(12)": 1,
+   "F2(11)": 1,
+   "G2(15)": 1,
+   "F2(16)": 1,
+   "F2(33)": 1,
+   "G1(23)": 1,
+   "ZETA4": 1,
+   "G1(24)": 1,
+   "F2(13)": 1,
+   "G1(13)": 1,
+   "G3(13)": 1,
+   "G1(37)": 1
+  }
+ },
+ {
+  "xxyy": "2201",
+  "logs": [
+   "c2201e.log",
+   "c2201o.log"
+  ],
+  "free": {
+   "EAV": 11,
+   "F^k(direct)": 14,
+   "ALPHA/BETA": 6,
+   "ZETA": 15,
+   "G^k(exchange)": 13
+  },
+  "fixed": {
+   "F^k(direct)": 216,
+   "ALPHA/BETA": 87,
+   "G^k(exchange)": 300,
+   "EAV": 111,
+   "ZETA": 178
+  },
+  "header": {
+   "npar": 3219,
+   "nj": 13,
+   "firstj": "0.5",
+   "ground_occ": "1 d 2 s 1 p 0 s 0 d 0 g 0 i 0 l 0"
+  },
+  "n_free": 59,
+  "n_fixed": 892,
+  "free_names": {
+   "EAV": 11,
+   "ZETA1": 11,
+   "F2(11)": 4,
+   "F4(11)": 4,
+   "ALPHA": 3,
+   "BETA": 3,
+   "G2(12)": 2,
+   "F2(15)": 2,
+   "ZETA3": 2,
+   "F2(13)": 2,
+   "G1(13)": 2,
+   "G3(13)": 2,
+   "ZETA5": 1,
+   "F4(15)": 1,
+   "G0(15)": 1,
+   "G2(15)": 1,
+   "G4(15)": 1,
+   "ZETA4": 1,
+   "F2(14)": 1,
+   "G1(14)": 1,
+   "G3(14)": 1,
+   "G1(23)": 1,
+   "G1(15)": 1
+  }
+ },
+ {
+  "xxyy": "2400",
+  "logs": [
+   "c2400e.log",
+   "c2400o.log"
+  ],
+  "free": {
+   "EAV": 28,
+   "F^k(direct)": 7,
+   "ALPHA/BETA": 3,
+   "ZETA": 6,
+   "G^k(exchange)": 8
+  },
+  "fixed": {
+   "ALPHA/BETA": 172,
+   "F^k(direct)": 299,
+   "ZETA": 154,
+   "G^k(exchange)": 282,
+   "EAV": 59
+  },
+  "header": {
+   "npar": 2716,
+   "nj": 16,
+   "firstj": "0.0",
+   "ground_occ": "1 d 4 s 2 p 0 s 0 d 0 g 0 i 0 l 0"
+  },
+  "n_free": 52,
+  "n_fixed": 966,
+  "free_names": {
+   "EAV": 28,
+   "ZETA1": 5,
+   "F2(11)": 3,
+   "F4(11)": 3,
+   "ALPHA": 3,
+   "G2(12)": 2,
+   "G1(14)": 2,
+   "G2(14)": 1,
+   "ZETA3": 1,
+   "F2(13)": 1,
+   "G1(13)": 1,
+   "G3(13)": 1,
+   "G1(23)": 1
+  }
+ },
+ {
+  "xxyy": "2600",
+  "logs": [
+   "c2600e.log",
+   "c2600o.log"
+  ],
+  "free": {
+   "EAV": 28,
+   "F^k(direct)": 15,
+   "ALPHA/BETA": 4,
+   "ZETA": 18,
+   "G^k(exchange)": 20
+  },
+  "fixed": {
+   "ALPHA/BETA": 219,
+   "F^k(direct)": 367,
+   "G^k(exchange)": 328,
+   "EAV": 83,
+   "ZETA": 183
+  },
+  "header": {
+   "npar": 3928,
+   "nj": 16,
+   "firstj": "0.0",
+   "ground_occ": "1 d 6 s 2 p 0 s 0 d 0 g 0 i 0 l 0"
+  },
+  "n_free": 85,
+  "n_fixed": 1180,
+  "free_names": {
+   "EAV": 28,
+   "ZETA1": 16,
+   "F4(11)": 4,
+   "ALPHA": 4,
+   "F2(11)": 3,
+   "G2(12)": 3,
+   "G1(14)": 3,
+   "G2(14)": 2,
+   "F2(15)": 2,
+   "G0(15)": 2,
+   "G2(15)": 2,
+   "F2(16)": 2,
+   "ZETA3": 2,
+   "F2(13)": 2,
+   "G1(13)": 2,
+   "G3(13)": 2,
+   "F2(14)": 2,
+   "G0(24)": 1,
+   "G4(15)": 1,
+   "G1(23)": 1,
+   "G3(14)": 1
+  }
+ },
+ {
+  "xxyy": "2601",
+  "logs": [
+   "c2601e.log",
+   "c2601o.log"
+  ],
+  "free": {
+   "EAV": 21,
+   "F^k(direct)": 33,
+   "ALPHA/BETA": 8,
+   "ZETA": 16,
+   "G^k(exchange)": 21
+  },
+  "fixed": {
+   "ALPHA/BETA": 163,
+   "F^k(direct)": 265,
+   "ZETA": 140,
+   "G^k(exchange)": 263,
+   "EAV": 64
+  },
+  "header": {
+   "npar": 2645,
+   "nj": 16,
+   "firstj": "0.5",
+   "ground_occ": "1 d 7 s 0 p 0 s 0 d 0 g 0 i 0 l 0"
+  },
+  "n_free": 99,
+  "n_fixed": 895,
+  "free_names": {
+   "EAV": 21,
+   "ZETA1": 13,
+   "F2(11)": 9,
+   "F4(11)": 9,
+   "F2(15)": 5,
+   "ALPHA": 4,
+   "BETA": 4,
+   "G2(14)": 3,
+   "G1(13)": 3,
+   "G2(12)": 2,
+   "F4(15)": 2,
+   "G0(15)": 2,
+   "G2(15)": 2,
+   "F2(16)": 2,
+   "ZETA3": 2,
+   "F2(13)": 2,
+   "G3(13)": 2,
+   "F2(14)": 2,
+   "G1(14)": 2,
+   "G0(24)": 1,
+   "ZETA5": 1,
+   "G4(15)": 1,
+   "F2(33)": 1,
+   "F4(16)": 1,
+   "G3(14)": 1,
+   "G1(23)": 1,
+   "G1(15)": 1
+  }
+ }
+]
