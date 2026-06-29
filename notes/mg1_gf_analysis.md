@@ -380,3 +380,31 @@ Good piece kept: build_ine20 --max-energy <cm^-1> caps the fit to the bound
 spectrum (our NIST cache carries 90+ autoionizing/high-Rydberg levels above the
 IE that shouldn't be fit over an incomplete basis). Verified: 284 -> 204 levels
 below the Mg I IE. Necessary but not sufficient -- the J-block bug dominates.
+
+## DECISIVE: full-basis fit, correct deck + ridge, STILL loses to 9-config -> scaled HF is THE remaining lever
+
+Ran the full-basis fit via gf_fit (RCG forward model + HF ridge prior, NOT RCE),
+on the now-correct deck, free EAV+Slater of observed configs (167 params),
+CI frozen at raw HF, ridge=1, lam=3.
+
+  seed (ab initio)   gfRMS(A/B) 0.178
+  full-basis fit     gfRMS(A/B) 0.220   levelRMS 322   <- still worse
+  our 9-config fit   gfRMS(A/B) 0.063
+  Bob                levelRMS 12
+
+RIDGE WORKED: chi2 26183->9066, cov=ok, NO divergence (RCE diverged to 229 kK on
+the same deck -- regularization is exactly why gf_fit succeeds where RCE fails).
+DECK IS CORRECT (clean optimizer gives the same 0.220 as before the parser fixes,
+confirming those fixes were faithful). Free-set is the ruleset's.
+
+So with completeness + correct deck + correct free-set + working regularization
+all in place, the full basis STILL loses to 9-config. By ELIMINATION the remaining
+cause is the one thing not yet done: CI frozen at RAW HF (ruleset Rule 2 = SCALED
+HF). Signature confirmed: full-basis-fit 3s2->3s3p gap = 23435 (obs 21850, +1585),
+ground 3s2 = -4884 -- the raw-HF-CI distortion the frozen CI can't let the fit
+correct. This is now ISOLATED beyond doubt.
+
+NEXT (unambiguous): apply the HF scale to frozen CI. Global scale already shown to
+fail (errors are per-integral), so extract Bob's PER-INTEGRAL HF scale factors
+from b1200*.log / hf1200z.* and apply them, then re-fit. That is the last missing
+ingredient of the ruleset (Rule 2).
