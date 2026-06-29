@@ -39,7 +39,10 @@ def _termkey(term):
     return ms[-1] if ms else term.strip()
 
 
-_ORB = re.compile(r"[1-9][spdfghik]\d?(?![spdfghik])")
+# n (one or more digits) + l + optional occupation; the occupation digit only
+# counts when NOT followed by another orbital letter or digit, so '3s11d' parses
+# as 3s + 11d (not 3s^1 + 1d) and '3p2' as 3p^2.
+_ORB = re.compile(r"\d+[spdfghik](?:\d(?![spdfghik\d]))?")
 
 
 def _cfgkey(config):
@@ -48,10 +51,10 @@ def _cfgkey(config):
     toks = _ORB.findall(config)
     norm = []
     for t in toks:
-        m = re.match(r"([1-9][spdfghik])(\d?)", t)
+        m = re.match(r"(\d+[spdfghik])(\d?)", t)
         nl, occ = m.group(1), m.group(2)
         norm.append(nl + (occ if occ and occ != "1" else ""))
-    if norm and re.fullmatch(r"[1-9][spdfghik]2", norm[-1]):
+    if norm and re.fullmatch(r"\d+[spdfghik]2", norm[-1]):
         return norm[-1]
     return ".".join(norm[-2:]) if norm else config.strip()
 
@@ -122,10 +125,15 @@ def is_flag_line(line):
 
 
 def _is_groupcode_line(line):
-    """The parameter-group-code lines are integer lines whose entries are large
+    """The parameter-group-code lines are INTEGER lines whose entries are large
     in magnitude (|code| >= 100). Per-level flag lines are small sequential
-    integers (1,2,3,...). Use the magnitude to tell them apart."""
-    ints = re.findall(r"-?\d+", line)
+    integers (1,2,3,...); value/eigenvalue lines are floats. Exclude any line
+    containing a decimal point (a float line like '129.5661 ...' has integers
+    >=100 in its digits but is NOT a group-code line)."""
+    s = line.rstrip("\n")
+    if "." in s:
+        return False
+    ints = re.findall(r"-?\d+", s)
     if not ints:
         return False
     return any(abs(int(x)) >= 100 for x in ints)
@@ -149,11 +157,11 @@ def fmt_flags(flags):
 
 
 def build(outgine_path, nist_levels, computed_terms, out_path, free_ci_with=(),
-          freeze=()):
+          freeze=(), ruleset=None):
     with open(outgine_path) as f:
         lines = f.readlines()
     _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with,
-                   freeze)
+                   freeze, ruleset)
 
 
 def _infer_block_parity(header_block_lines):
@@ -173,8 +181,20 @@ def _infer_block_parity(header_block_lines):
     return "o" if lsum % 2 else "e"
 
 
+def _block_orbitals(hdr):
+    """Ordered l-letters of the block's orbitals, from the config-names header
+    (used to map F^k/G^k orbital indices (ij) to l). Best-effort."""
+    text = " ".join(hdr)
+    # the first config-names line lists configs; take distinct orbitals in order
+    orbs = []
+    for nl in re.findall(r"\d([spdfghik])", text):
+        if nl not in orbs:
+            orbs.append(nl)
+    return orbs
+
+
 def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=(),
-                   freeze=()):
+                   freeze=(), ruleset=None):
     """Walk blocks; within each, replace consecutive (value-line, flag-line)
     pairs (one per J, ascending from the block's minimum J) with observed
     levels. Each computed J-slot (energy-ordered) is matched to the observed
@@ -261,13 +281,23 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
                 codes = []
                 for gj in gc_lines:
                     codes.extend(int(x) for x in re.findall(r"-?\d+", lines[gj]))
+                borbs = _block_orbitals(hdr) if ruleset else None
                 newcodes = []
                 for L, code in enumerate(codes):
                     name = pnames[L] if L < len(pnames) else ""
                     cfg = pcfgs[L] if L < len(pcfgs) else None
-                    if (_is_physical_param(name)
-                            and not _is_eav_reference(name, L,
-                                                      block_index == 0)
+                    is_ref = _is_eav_reference(name, L, block_index == 0)
+                    if ruleset is not None:
+                        # ruleset-driven (notes/bob_fit_ruleset.md): free by family
+                        # + shell, never the ground-EAV reference, honor --freeze.
+                        free = (not is_ref
+                                and not _is_frozen(name, cfg, freeze)
+                                and _ruleset_free(name, cfg,
+                                                  ruleset["observed_cfgs"],
+                                                  ruleset["open_ls"],
+                                                  ruleset["is_ion"], borbs))
+                        newcodes.append(0 if free else code)
+                    elif (_is_physical_param(name) and not is_ref
                             and not _is_frozen(name, cfg, freeze)):
                         newcodes.append(0)        # free physical param
                     elif _is_free_ci(name, free_ci_with):
@@ -320,6 +350,59 @@ def _is_physical_param(name):
     return bool(re.match(r"(EAV|ZETA|[FG]\d)", name))
 
 
+# -------------------------- ruleset-driven free/freeze --------------------------
+# Implements notes/bob_fit_ruleset.md (derived from Bob's fits of 10 species):
+# free only the integrals the observed level structure directly constrains, by
+# parameter family, shell-aware. Everything else stays FIXED (group code kept) and
+# is held at scaled HF by the prior. Off-diagonal CI (R^k) is NEVER freed here.
+_FG = re.compile(r"([FG])(\d)\((\d)(\d)\)")
+
+
+def _orbital_l(config, idx, block_orbitals):
+    """l-letter of the idx-th (1-based) orbital of `config`, using the block's
+    orbital list when available; falls back to the config's own orbitals."""
+    if block_orbitals and 1 <= idx <= len(block_orbitals):
+        return block_orbitals[idx - 1]
+    orbs = re.findall(r"\d([spdfghik])", config or "")
+    return orbs[idx - 1] if 1 <= idx <= len(orbs) else None
+
+
+def _ruleset_free(name, cfg, observed_cfgs, open_ls, is_ion, block_orbitals):
+    """Decide free (True) vs freeze (False) for a single-config physical param,
+    per the ruleset. `observed_cfgs` = set of _cfgkey strings with >=1 observed
+    level; `open_ls` = set of open-shell l-letters in the ground config (e.g.
+    {'p'} for p^2, {'d'} for d^n); `is_ion` = charge>0."""
+    obs = _cfgkey(cfg) in observed_cfgs if cfg else False
+    nm = name.strip()
+    # Rule 1: EAV of any observed config (the global ground EAV is handled by the
+    # caller's _is_eav_reference pin).
+    if nm.startswith("EAV"):
+        return obs
+    # Rule 3: exchange G^k -- free where an observed multiplet splitting exists.
+    if re.match(r"G\d", nm):
+        return obs
+    # Rule 4: spin-orbit ZETA -- free where fine structure is observed (the
+    # ion-dependent precision floor is a refinement handled by the prior width).
+    if nm.startswith("ZETA"):
+        return obs
+    # Rule 5: direct F^k -- only for the open/same shell (intra-shell pair).
+    if re.match(r"F\d", nm):
+        m = _FG.match(nm)
+        if not m or not obs:
+            return False
+        i, j = int(m.group(3)), int(m.group(4))
+        if i == j:                                   # same-orbital (e.g. 3p^2)
+            li = _orbital_l(cfg, i, block_orbitals)
+            return li in open_ls if open_ls else True
+        return False                                 # cross-shell direct: freeze
+    # Rule 6: Trees ALPHA (open shell, always) / BETA (ions only, sparingly).
+    if nm.startswith("ALPHA"):
+        return bool(open_ls) and obs
+    if nm.startswith("BETA"):
+        return bool(open_ls) and obs and is_ion
+    return False
+
+
 def _ci_configs(name):
     """For a CI parameter name like '161D1122' or '120D1113', return the pair of
     coupled configuration indices. The name is <c1><c2><k><D|E><....>: first two
@@ -366,6 +449,33 @@ def _is_eav_reference(name, L, is_first_block):
     return bool(is_first_block and name.startswith("EAV") and L == 0)
 
 
+def _ground_open_shells(nist_path):
+    """Open-shell l-letters of the lowest observed config (partially-filled l).
+    e.g. Mg I 3s^2 -> set() (closed); Fe II 3d^7 -> {'d'}; Si I 3s^2 3p^2 -> {'p'}.
+    Reads the raw config string (col 0) of the lowest-energy observed level."""
+    full = {"s": 2, "p": 6, "d": 10, "f": 14}
+    best_E, best_cfg = None, None
+    with open(nist_path) as f:
+        for ln in f:
+            if ln.startswith("#") or not ln.strip():
+                continue
+            p = ln.rstrip("\n").split("\t")
+            if len(p) < 6 or p[5] == "1":
+                continue
+            try:
+                E = float(p[3])
+            except ValueError:
+                continue
+            if best_E is None or E < best_E:
+                best_E, best_cfg = E, p[0]
+    opens = set()
+    for n, l, occ in re.findall(r"(\d)([spdfghik])(\d*)", best_cfg or ""):
+        o = int(occ) if occ else 1
+        if l in full and 0 < o < full[l]:
+            opens.add(l)
+    return opens, best_cfg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outgine", required=True)
@@ -384,6 +494,14 @@ def main():
                          "exchange integrals the fit drives unphysical, which "
                          "wrecks gf. Empty config ':G1' freezes that param in "
                          "all configs.")
+    ap.add_argument("--ruleset", action="store_true",
+                    help="select free params by the physics ruleset "
+                         "(notes/bob_fit_ruleset.md): EAV(observed) + G^k + ZETA "
+                         "where observed + same-shell F^k + Trees ALPHA/BETA for "
+                         "open shells; never free off-diagonal CI. Shell-aware.")
+    ap.add_argument("--ion", action="store_true",
+                    help="this species is an ION (charge>0); enables Trees BETA "
+                         "freeing per the ruleset. Default: neutral.")
     a = ap.parse_args()
     free_ci = set()
     for tok in a.free_ci_pairs.split(","):
@@ -398,9 +516,18 @@ def main():
             freeze.add((cfg.strip(), prm.strip()))
     nist = load_nist_levels(a.nist)
     cterms = load_computed_terms(a.outg11)
-    build(a.outgine, nist, cterms, a.out, free_ci, freeze)
+    ruleset = None
+    if a.ruleset:
+        observed = {d["cfgk"] for v in nist.values() for d in v}
+        open_ls, gcfg = _ground_open_shells(a.nist)
+        ruleset = {"observed_cfgs": observed, "open_ls": open_ls,
+                   "is_ion": a.ion}
+        print(f"  ruleset: ground={gcfg!r} open_shells={open_ls or 'closed'} "
+              f"ion={a.ion}  observed_configs={len(observed)}")
+    build(a.outgine, nist, cterms, a.out, free_ci, freeze, ruleset)
     print(f"wrote {a.out}  (free CI with configs {free_ci or 'none'}; "
-          f"frozen params {freeze or 'none'})")
+          f"frozen params {freeze or 'none'}; "
+          f"ruleset={'on' if ruleset else 'off'})")
 
 
 if __name__ == "__main__":

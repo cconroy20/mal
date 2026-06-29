@@ -305,3 +305,30 @@ a fixed kind list. A good general heuristic: free EAV(observed) + ZETA + G^k +
 F^k of the OPEN/same shell + (for d^n/f^n) ALPHA/BETA; ridge-prior the rest. This
 covers Mg-I-like and Fe-II-like ions with one rule. (Cowan RCE supports
 ALPHA/BETA; our gf_fit/ing11_params must learn to read/free them.)
+
+## Ruleset selector implemented; full-basis OUTGINE group-code walk still blocking
+
+Implemented the physics ruleset (notes/bob_fit_ruleset.md) as build_ine20
+--ruleset: _ruleset_free(name,cfg,observed,open_ls,is_ion,orbitals) decides
+free/freeze by family + shell. VERIFIED CORRECT in isolation: on full-basis Mg I
+block 0 it would free 31 EAV + 49 G^k + 31 ZETA + 3 F^k (and never CI/ALPHA/BETA
+since Mg I is closed-shell) -- exactly the ruleset intent. CLI infers ground
+config/open-shells/observed-configs from NIST automatically (--ion flag for BETA).
+
+Fixed two real bugs found along the way:
+- _cfgkey multi-digit n: '3d10d'->'3d.10d' (was '3d'), '3s11d'->'3s.11d'. Same
+  bug in BOTH build_ine20._ORB and make_report._ORB; fixed both to agree (they
+  must match for config-key matching). 9-config report unchanged.
+- _is_groupcode_line: was matching FLOAT eigenvalue lines ('129.5661...') because
+  they contain integers >=100; now excludes any line with a '.'.
+
+REMAINING BLOCKER: on the 122-config OUTGINE the group-code SECTION walk doesn't
+align name<->code across the (apparently multi-section / interleaved) full-basis
+layout -- the ruleset freeings compute correctly but don't all land in the output
+INE20 (audit sees only a tiny slice freed). The 9-config OUTGINE is a single
+clean block and works; the full-basis layout differs and needs the block/group-
+code walker generalized (likely multiple group-code runs per parity block, or
+the param-name header vs group-code ordering diverges at scale). 9-config
+pipeline regression-tested OK (AVDEV->0).
+NEXT: generalize _build_focused's group-code section handling for large OUTGINE;
+then re-run full-basis Mg I with --ruleset and the HF ridge prior.

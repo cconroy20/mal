@@ -127,25 +127,28 @@ def _termkey(term):
     return ms[-1] if ms else term.strip()
 
 
-# orbital token with non-greedy occupation (same lookahead trick as parity)
-_ORB = re.compile(r"[1-9][spdfghik]\d?(?![spdfghik])")
+# orbital token: multi-digit n + l + optional occupation; the occupation digit
+# counts only when NOT followed by another orbital letter or digit, so '3s11d'
+# parses as 3s + 11d (not 3s^1 + 1d) and '3p2' as 3p^2. (Must stay identical to
+# build_ine20._ORB so config keys agree between the two.)
+_ORB = re.compile(r"\d+[spdfghik](?:\d(?![spdfghik\d]))?")
 
 
 def _cfgkey(config):
     """Reduce a config to its valence orbital tokens (occupations normalized),
-    e.g. 'Mg I   3s3p' -> '3s.3p', '3s.3p' -> '3s.3p', '2p6.3s2' -> '3s2'.
-    Keeps the last two orbital tokens (the valence part); drops occupation '1'
-    and closed-shell markers so computed and NIST forms agree."""
+    e.g. 'Mg I   3s3p' -> '3s.3p', '3s.3p' -> '3s.3p', '2p6.3s2' -> '3s2',
+    '3s11d' -> '3s.11d'. Keeps the last two orbital tokens (the valence part);
+    drops occupation '1' and closed-shell markers so computed and NIST agree."""
     toks = _ORB.findall(config)
     norm = []
     for t in toks:
-        m = re.match(r"([1-9][spdfghik])(\d?)", t)
+        m = re.match(r"(\d+[spdfghik])(\d?)", t)
         nl, occ = m.group(1), m.group(2)
         norm.append(nl + (occ if occ and occ != "1" else ""))
     # a single doubly-occupied valence orbital (e.g. 3s2) is the ground-type
     # config; NIST often writes it with the closed core (2p6.3s2). Reduce to the
     # outermost token so the two forms agree.
-    if norm and re.fullmatch(r"[1-9][spdfghik]2", norm[-1]):
+    if norm and re.fullmatch(r"\d+[spdfghik]2", norm[-1]):
         return norm[-1]
     return ".".join(norm[-2:]) if norm else config.strip()
 
