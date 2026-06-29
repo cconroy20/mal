@@ -408,3 +408,34 @@ NEXT (unambiguous): apply the HF scale to frozen CI. Global scale already shown 
 fail (errors are per-integral), so extract Bob's PER-INTEGRAL HF scale factors
 from b1200*.log / hf1200z.* and apply them, then re-fit. That is the last missing
 ingredient of the ruleset (Rule 2).
+
+## Scaled-HF fit: fixes ENERGIES, not gf -> the limiter is per-integral scale granularity
+
+Applied Bob's HF screening (CI x0.75, Slater x0.8; tools/scale_hf.py) to the
+frozen background, re-fit (ridge, ruleset free-set). Results:
+  scaled-HF fit: levelRMS 324, gfRMS(A/B) 0.212  (raw-HF was 0.220)
+  Rule 2 WORKED for energies: 3s2->3s3p gap 23435 -> 21476 (obs 21850, now great);
+    ground depression gone (-2926). chi2 13951->5843 (vs raw 26183->9066).
+  But gf barely moved (0.225->0.212), still >> 9-config 0.063.
+
+Apples-to-apples: on the 7 lines BOTH fits cover, 9-config RMS 0.063 vs full-basis
+0.225. So full-basis is genuinely worse ON THE SAME LINES, not just covering more.
+Worst residuals = singlet 3s.nd 1D -> 3s3p 1P and 3s2 -> 3s4p 1P (all ~0.5 dex
+too weak).
+
+KEY COMPARISON vs Bob's OWN gf on those exact lines:
+  3s2->3s4p 1P  (nist -0.95):  Bob d=-0.13,  us d=-0.57
+  3s4d 1D->3s3p 1P (nist -0.50): Bob d=-0.14, us d=-0.51
+Bob gets them RIGHT (~0.13) with the SAME complete basis and SAME freeze-CI
+philosophy. So the gap is NOT the basis, NOT the CI-freezing rule, NOT ridge --
+it is that Bob's frozen parameter VALUES are better than our uniform-per-family
+scale. Bob uses PER-INTEGRAL scales (G^k at 0.6 vs 0.8, CI at 0.7 vs 0.8); our
+flat CI 0.75 / Slater 0.8 is too coarse for these sensitive singlet 1D/1P/1S
+interactions. (Also: our 9-config win was partly because it FREED CI to absorb
+missing-config error -- a small-basis crutch that happened to nail 7 lines.)
+
+CONCLUSION: the engine is complete & correct; the remaining gap to Bob is
+PER-INTEGRAL HF SCALE FIDELITY. NEXT: read Bob's exact per-integral scale (and
+his fitted G^k) from c1200*.log and transcribe them onto our integrals (he gives
+fitted_value, HF_value, and scale per line), rather than a flat per-family scale.
+That is the difference between "Bob-style" and "Bob's actual numbers".
