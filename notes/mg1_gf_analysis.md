@@ -332,3 +332,26 @@ the param-name header vs group-code ordering diverges at scale). 9-config
 pipeline regression-tested OK (AVDEV->0).
 NEXT: generalize _build_focused's group-code section handling for large OUTGINE;
 then re-run full-basis Mg I with --ruleset and the HF ridge prior.
+
+## Full-basis RULESET fit (first run) -- confirms Rule 2 (scaled HF) is load-bearing
+
+Ran the bulletproofed build_ine20 --ruleset on full Mg I: freed 243 = 66 EAV +
+100 G^k + 74 ZETA + 3 F^k (no CI/ALPHA-BETA; correct for closed shell), then RCE.
+RESULT: RCE did NOT converge cleanly (AVDEV oscillated ~4.5-56 kK), and gf got
+WORSE: seed strong+A/B 0.178 -> ruleset-fit 0.439. Ground 3s2 1S = -8714 cm^-1,
+3s2->3s3p 3P gap = 24217 (obs 21850, now 2367 TOO LARGE).
+
+Diagnosis: SAME root cause as the earlier "free all EAV+P" full-basis failure --
+the frozen CI is at RAW HF, which structurally distorts the gap; RCE freed the
+right things (EAV/G/ZETA per ruleset) but can't repair a gap error that lives in
+the frozen CI. The fit thrashes trying to compensate through the wrong knobs.
+(Also: subst_fitted_params only handled 61 per-config lines, not the freed
+within-config G/ZETA/F -- needs generalizing -- but the RCE instability is the
+real blocker, not the substitution.)
+
+CONCLUSION: this is exactly Rule 2 of our own ruleset -- freeze at SCALED HF
+(~0.85), not raw HF. The ruleset's FREE set is validated (correct families), but
+the FROZEN background must be scaled first. The two are inseparable: completeness
++ correct free set + scaled-HF frozen background. NEXT: apply a per-integral (or
+uniform ~0.85 CI/Slater) HF scale to the OUTGINE before --ruleset + RCE; extract
+Bob's actual scales from b*.log/hf*.dat for the per-integral version.
