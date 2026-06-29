@@ -172,3 +172,42 @@ ridge~1 keeps ~free-fit quality (gf 0.077 vs 0.063, level 46 vs 38) but is now
 FULL-RANK with a finite covariance -- the prerequisite for MC gf uncertainties,
 and a principled stand-in for hand-selecting free vs fixed. Knobs: --ridge,
 --abinitio (prior centre), --free-kinds (optional hard restriction), PRIOR_SIGMA.
+
+## Full-basis (122-config) fit: completeness ALONE is not enough; CI matters
+
+Grew Mg I to Bob's 122-config basis (tools/gen_in36.py, work/run_mg1_full.sh) and
+fit Bob-style: free EAV+Slater of OBSERVED configs (170 params), freeze ALL CI +
+unobserved-config params at HF, ridge prior toward HF (ridge=1, lam=3, LM).
+Required first fixing parse_compositions for multi-chunk EIGENVECTORS blocks
+(commit 5e567ff) -- it mislabelled levels on large bases (called the ground state
+'3p4p'); now correct, gf matches to NIST 1->79.
+
+RESULT (1217 evals, 62 min, well-posed cov):
+  full-basis seed (ab initio): levelRMS 788   gfRMS(A/B) 0.178
+  full-basis fit (EAV+P,ridge1): levelRMS 322  gfRMS 0.220   <- WORSE gf!
+  our 9-config fit:            levelRMS 37    gfRMS 0.063
+  Bob:                          levelRMS 12
+
+Completeness alone made things WORSE, not better. Diagnosis (not a matching bug
+-- matches are correct): most levels fit well (median |resid| ~20 cm^-1) but a
+few have huge residuals, dominated by the GROUND STATE: full-basis ab-initio 3s2
+1S sits ~1700 cm^-1 BELOW where the bulk of levels want the zero. The large basis
+introduces strong CI (3s2-3p2-3d2 mixing) that DEPRESSES 3s2 -- and we FROZE all
+CI at HF, so the fit cannot correct it. The worst gf residuals are the singlet
+3s.nd 1D -> 3s3p 1P series (all too weak), driven by the same uncorrected
+singlet-system CI.
+
+KEY LESSON: freezing all CI works for Bob because his HF Slater/CI are SCALED
+(his FIXEDHF carries scale factors ~0.6-0.85) so the frozen values already give
+the right ground state; our raw HF CI does not. So either (a) free the key CI
+integrals (3s2-3p2, 3s2-3d2, ... -- the ones our 9-config experiment found
+HELP), or (b) adopt Bob's HF SCALE FACTORS for the frozen CI/Slater (extract from
+his b*.log / hf*.dat). Completeness + HF-prior is necessary but needs the CI
+treated, not frozen raw.
+
+Also: the energy zero-point/offset (currently median residual) is fragile on the
+large basis -- should anchor on the ground state, but that only matters once the
+ground-state CI depression is fixed.
+
+NEXT: extract Bob's HF scale factors, or free the dominant CI integrals on the
+full basis and re-fit; compare gf to Bob.

@@ -80,7 +80,7 @@ class Forward:
     precomputed so each evaluation just runs RCG and matches."""
 
     def __init__(self, run_dir, seed_ing11, nist_path, nist_lines_path,
-                 free_kinds=None, abinitio_ing11=None):
+                 free_kinds=None, abinitio_ing11=None, obs_configs=None):
         self.run_dir = os.path.abspath(run_dir)
         self.ing11 = os.path.join(self.run_dir, "ING11")
         self.outg11 = os.path.join(self.run_dir, "OUTG11")
@@ -92,8 +92,17 @@ class Forward:
         # parameter kinds (e.g. {"EAV"} or {"EAV","P"}); the rest stay pinned at
         # their ab-initio seed value (IP.write only touches self.params). 'P' =
         # single-config Slater/zeta (F^k,G^k,zeta); 'CI' = interaction integrals.
-        self.params = ([p for p in allp if p["kind"] in free_kinds]
-                       if free_kinds else allp)
+        if free_kinds:
+            allp = [p for p in allp if p["kind"] in free_kinds]
+        # ...and optionally drop params whose CONFIG has no observed level: the
+        # data can't constrain those, so freezing them at HF cuts the free-param
+        # count (Jacobian cost) with no loss -- on the full Mg I basis this is
+        # 269 -> 170. obs_configs is a set of _cfgkey strings.
+        if obs_configs is not None:
+            allp = [p for p in allp
+                    if R._cfgkey(p["key"].split("|")[0].replace("Mg I", "")
+                                 .strip()) in obs_configs]
+        self.params = allp
         self.seed = np.array([p["value"] for p in self.params])
         # Ridge-prior CENTRES = ab-initio (HF) values per free param, looked up
         # by key from the ab-initio ING11; fall back to the seed value if absent.
@@ -324,7 +333,7 @@ def make_objective(fwd, lam, ridge):
     return obj, scale
 
 
-def fit_lm(fwd, lam, ridge, maxiter, presolve=True):
+def fit_lm(fwd, lam, ridge, maxiter, presolve=True, progress=None):
     """Levenberg-Marquardt fit on the stacked residual vector. Returns
     (best_values, result, scale, cov) where cov is the parameter covariance in
     SCALED units (x = value/scale), estimated from the Jacobian at the optimum
@@ -344,9 +353,16 @@ def fit_lm(fwd, lam, ridge, maxiter, presolve=True):
                       options={"maxiter": maxiter, "maxfev": maxiter,
                                "xatol": 1e-4, "fatol": 1e-3, "adaptive": True})
         x0 = nm.x
+    # wrap the residual so we can emit progress (eval count + current chi2);
+    # `progress(msg)` is any callable (e.g. append-to-file). Useful for the slow
+    # full-basis fits where each eval is ~1s and a run is hundreds of evals.
+    def resid(x):
+        v = fwd.resid_vector(x, scale, lam, ridge)
+        if progress is not None:
+            progress(f"eval {fwd.neval:5d}  chi2={float(v @ v):12.3f}")
+        return v
     res = least_squares(
-        lambda x: fwd.resid_vector(x, scale, lam, ridge), x0,
-        method="lm", max_nfev=maxiter, xtol=1e-8, ftol=1e-8,
+        resid, x0, method="lm", max_nfev=maxiter, xtol=1e-8, ftol=1e-8,
         diff_step=1e-3)              # finite-diff step in scaled units
     best = res.x * scale
     # --- covariance & its ERROR-MODEL assumptions (read before trusting sigmas) -
