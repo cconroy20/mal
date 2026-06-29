@@ -272,3 +272,36 @@ every observed 3s.np and 3s.nd + ZETA + F^2 for same-shell (3p^2,3d^2), ridge
 prior on the rest. This is far more targeted than "free all EAV+P" (which freed
 many irrelevant F^k and missed that exchange is the key lever), and it matches
 both Bob and our successful 9-config fit. CI: revisit via scaled-HF, separately.
+
+## Cross-species check: Fe II (open 3d^7) -- the rules generalize but EMPHASIS shifts
+
+Parsed Bob's Fe II logs (c2601e/o.log; NPAR 2645 even / 2393 odd, ground = 3d^7).
+Free counts (corrected for per-config repeats):
+
+  Fe II EVEN: ~462 fixed, free = ALPHA x47, BETA x46, ZETA x9, F2/F4(11) [3d-3d]
+              several, plus scattered G^k/F^k for 3d-nl; relatively FEW EAVs (~13).
+  Fe II ODD:  similar (ALPHA/BETA dominant, F/G of the d-shell, few EAV).
+
+CONTRAST WITH Mg I:
+  Mg I (closed-shell + 1-2 valence e-): free set ~95% EAV; key non-EAV = G^1
+     EXCHANGE (singlet-triplet splitting) + ZETA. No ALPHA/BETA. No F^k(dd).
+  Fe II (open 3d^7): free set dominated by ALPHA/BETA (Trees effective-operator
+     CI corrections for the d^n shell) + F^2/F^4(3d,3d) (which BUILD the d-shell
+     term structure) + G^k + ZETA. EAVs a minority.
+
+GENERAL PRINCIPLE (holds for both): free the radial integrals that the OBSERVED
+LEVEL STRUCTURE most directly constrains, freeze everything else at (scaled) HF.
+WHICH integrals those are is dictated by the open shell:
+  - closed/few-electron  -> EAV centroids + exchange G^k + spin-orbit ZETA.
+  - open d^n (iron group) -> intra-shell F^2/F^4(dd) (term structure) + ALPHA/BETA
+    (far-config CI as effective operators) + G^k + ZETA; EAVs secondary.
+The 'free exchange/spin-orbit, free same-shell direct F, freeze CI' rules from Mg
+I are a SPECIAL CASE; the iron-group case adds the dd-direct integrals and the
+Trees alpha/beta operators because the open shell makes them the dominant,
+observable degrees of freedom.
+
+IMPLICATION for our engine: the free-set SELECTOR must be config/shell-aware, not
+a fixed kind list. A good general heuristic: free EAV(observed) + ZETA + G^k +
+F^k of the OPEN/same shell + (for d^n/f^n) ALPHA/BETA; ridge-prior the rest. This
+covers Mg-I-like and Fe-II-like ions with one rule. (Cowan RCE supports
+ALPHA/BETA; our gf_fit/ing11_params must learn to read/free them.)
