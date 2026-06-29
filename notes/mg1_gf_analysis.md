@@ -235,3 +235,40 @@ factor -- the HF errors point different ways for different integrals. The path
 the evidence supports on the full basis = SELECTIVE freeing (Bob-style): EAVs +
 a few low-config Slater (esp. 3s3p G^1) + the dominant CI (esp. 3s2-3p2, which
 our 9-config fit cut 59%), ridge prior holding the rest at HF. NOT global scaling.
+
+## What Bob actually freed (from c1200ez/oz.log) -- the general rules
+
+Parsed his parameter status (col5 = uncertainty/step: nonzero => free; FIXEDHF =>
+held at HF). Of ~200 params per parity he freed:
+
+  EVEN: 57 free = 55 EAV + F2(22) + ZETA 2
+  ODD:  87 free = 57 EAV + 30 non-EAV, the non-EAV being:
+        G1(12)=3s-3p exchange, G1(13)=3s-np exchange for n=4..15 (one per member,
+        values decay 23423->11.8 cm^-1, INDEPENDENT group codes), ZETA 3 series,
+        plus G1(27),G1(27),F2(28),G1(28) for the 3p-nd / 3d configs.
+
+GENERAL LESSONS (the craft, generalized):
+1. Free EAVs almost universally -- one centroid per config that has an observed
+   level. (~95% of his free params.) These are the best-determined; data fixes
+   each config's absolute position.
+2. Free EXCHANGE integrals G^k (esp. G^1) -- they set the singlet-triplet
+   SPLITTING, which observed levels directly pin. He frees G^1 for the WHOLE
+   Rydberg series (every observed 3s.np), not just low members; values decay
+   smoothly with n. <-- this is exactly the integral our diagnosis found wrong
+   (1P-3P splitting too large at HF).
+3. Free SPIN-ORBIT ZETA -- sets fine structure (the J-splitting within a term),
+   again directly observed. Freed per series member.
+4. Free DIRECT F^k only for SAME-SHELL configs (F2(22)=3p^2, F2(28)=3d-nd type)
+   where the direct integral is large and the term structure constrains it.
+   NOT freed for 3s.nl configs (one electron in a closed-ish core -> F^k small).
+5. Free ~NO CI (R^k) -- he holds interaction integrals at (scaled) HF. [Our raw
+   HF CI doesn't work frozen; see prior section -- but the lesson stands that CI
+   is the LAST thing to free, after exchange/spin-orbit/EAV.]
+6. Each integral freed INDEPENDENTLY (distinct group codes), not tied across the
+   series -- though the fitted values come out following a smooth Rydberg trend.
+
+=> RECIPE for our full-basis fit: free EAV (observed configs) + G^1 exchange for
+every observed 3s.np and 3s.nd + ZETA + F^2 for same-shell (3p^2,3d^2), ridge
+prior on the rest. This is far more targeted than "free all EAV+P" (which freed
+many irrelevant F^k and missed that exchange is the key lever), and it matches
+both Bob and our successful 9-config fit. CI: revisit via scaled-HF, separately.
