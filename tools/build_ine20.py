@@ -223,14 +223,27 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
             return False
         return bool(re.match(r"\s*\d+\s+0\s+1\s+1\s+[\d.]+", lines[k + 1]))
 
+    def starts_jblock(k):
+        """True if line k begins a J-block: a value-line whose value-RUN is
+        immediately followed by a flag-RUN (the per-J T-values then their
+        inclusion flags). Distinguishes J-block value lines from the many other
+        float lines in the header (param values etc.), which a one-line lookahead
+        cannot, since J-block value/flag lines come in multi-line runs."""
+        if not is_value_line(lines[k]):
+            return False
+        p = k
+        while p < n and is_value_line(lines[p]):
+            p += 1
+        return p < n and is_flag_line(lines[p]) \
+            and not _is_groupcode_line(lines[p])
+
     while i < n:
         # block boundary
         if is_block_header(i):
-            # gather block header lines (until first value/flag pair) for parity
+            # gather block header lines (until the first J-block) for parity
             j = i + 1
             hdr = []
-            while j < n and not (is_value_line(lines[j]) and
-                                 j + 1 < n and is_flag_line(lines[j + 1])):
+            while j < n and not starts_jblock(j):
                 hdr.append(lines[j]); j += 1
             parity = _infer_block_parity(hdr)
             # now consume value/flag pairs == J-blocks, ascending J
@@ -240,24 +253,43 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
             # small per-level flags (1,2,3,...). The T-value section ends there;
             # everything after (group codes, denominators, parameter values,
             # trailer, -1) must be left untouched.
+            # A J-block = a contiguous run of VALUE lines (7 T-values each, last
+            # partial) followed by a contiguous run of FLAG lines (the level
+            # indices, same total count). On large bases a single J has dozens-to-
+            # hundreds of levels, so BOTH runs wrap across many lines -- we must
+            # gather the whole value run and the whole flag run, substitute across
+            # the full set, then re-emit preserving the 7-per-line format. (The
+            # old code assumed one value-line + one flag-line per J and mis-aligned
+            # everything past the first line on large blocks.)
             Jval = 0.0
-            while (j + 1 < n and is_value_line(lines[j])
-                   and _is_level_flag_line(lines[j + 1])):
-                ncomp = len(FLOAT7.findall(lines[j]))
+            while j < n and is_value_line(lines[j]):
+                v_lines = []
+                while j < n and is_value_line(lines[j]):
+                    v_lines.append(j); j += 1
+                # flag lines are level indices (1,2,3,...); STOP at a group-code
+                # line (multiples of 100), which is_flag_line also matches.
+                f_lines = []
+                while j < n and is_flag_line(lines[j]) \
+                        and not _is_groupcode_line(lines[j]):
+                    f_lines.append(j); j += 1
+                if not f_lines:           # not a J value/flag block; stop here
+                    j = v_lines[0]
+                    break
+                comps = []
+                for vj in v_lines:
+                    comps.extend(float(x) for x in FLOAT7.findall(lines[vj]))
                 Jkey = (parity, "%g" % Jval)
                 slots = computed_terms.get(Jkey, [])     # energy-ordered
                 obs = list(nist_levels.get(Jkey, []))
-                # Match by exact (config, term) IDENTITY -- both the computed
-                # slot (dominant eigenvector basis state) and the NIST level carry
-                # a reliable config+term now. Within an identity, pair in energy
-                # order. Robust to mixing and energy reordering.
+                # Match by exact (config, term) IDENTITY -- both the computed slot
+                # (dominant eigenvector basis state) and the NIST level carry a
+                # reliable config+term. Within an identity, pair in energy order.
                 obs_by_id = {}
                 for o in sorted(obs, key=lambda d: d["E"]):
                     obs_by_id.setdefault((o["cfgk"], o["tk"]), []).append(o)
                 seen_id = {}
                 newvals, newflags = [], []
-                for m in range(ncomp):
-                    comp = float(FLOAT7.findall(lines[j])[m])
+                for m, comp in enumerate(comps):
                     match = None
                     if m < len(slots):
                         ident = (slots[m]["cfgk"], slots[m]["tk"])
@@ -270,9 +302,11 @@ def _build_focused(lines, nist_levels, computed_terms, out_path, free_ci_with=()
                         newvals.append(match["E"]); newflags.append(m + 1)
                     else:
                         newvals.append(comp); newflags.append(-(m + 1))  # exclude
-                out[j] = fmt_values(newvals) + "\n"
-                out[j + 1] = fmt_flags(newflags) + "\n"
-                j += 2
+                # re-emit, 7 per line, over the SAME line slots (counts preserved)
+                for k, vj in enumerate(v_lines):
+                    out[vj] = fmt_values(newvals[k * 7:(k + 1) * 7]) + "\n"
+                for k, fj in enumerate(f_lines):
+                    out[fj] = fmt_flags(newflags[k * 7:(k + 1) * 7]) + "\n"
                 Jval += 1.0
             # --- free the physical parameters: rewrite the group-code block ---
             # The group-code run (lines of 0/+-100..) is the next CONTIGUOUS run
