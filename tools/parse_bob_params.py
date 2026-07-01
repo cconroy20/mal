@@ -33,10 +33,19 @@ _LINE = re.compile(
     r"(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)" # value, uncert, hf_ref
     r"(.*)$")                                     # rest
 
+# The 2nd column ("code") is Bob's CONFIG INDEX: every parameter of one config
+# (its EAV, ZETA, Gk, Fk) shares it. The EAV line for that code carries the config
+# LABEL (e.g. '3s3p'); the Gk/Fk/ZETA lines for the same code do NOT. So we group
+# by code and inherit the EAV's label -- no need to decode the occupation-vector
+# header. NB: code is per-PARITY (each parity block restarts at 1), so a parse must
+# not merge codes across the even/odd logs.
+
 
 def parse(path):
-    """Yield dicts {kind, group, value, uncert, hf_ref, scale, fixed, config, raw}
-    for every parameter line in an RCE log."""
+    """Return a list of dicts {code, kind, group, value, uncert, hf_ref, scale,
+    fixed, config, raw} for every parameter line in an RCE log. `config` is filled
+    from the line's own trailing label when present (EAV lines) and otherwise
+    INHERITED from the EAV of the same config `code` (Gk/Fk/ZETA lines)."""
     out = []
     for ln in open(path, errors="replace"):
         m = _LINE.match(ln)
@@ -49,8 +58,11 @@ def parse(path):
             continue
         gm = re.search(r"\((\d+)\)", kind_raw)
         group = int(gm.group(1)) if gm else None
-        base_kind = re.match(r"[A-Z]+\d*", knorm).group(0)
-        base_kind = re.sub(r"\(.*", "", base_kind)
+        # split the letter kind from the Slater rank k: 'G1(13)' -> kind 'G', k 1;
+        # 'F2(28)' -> kind 'F', k 2; 'EAV'/'ZETA' -> kind as-is, k None.
+        km = re.match(r"([A-Z]+)(\d+)?", knorm)
+        base_kind = km.group(1)
+        krank = int(km.group(2)) if km.group(2) else None
         value, uncert, hf_ref = float(m.group(4)), float(m.group(5)), float(m.group(6))
         rest = m.group(7)
         fixed = "FIXEDHF" in rest
@@ -60,9 +72,17 @@ def parse(path):
         # -3p2' for a CI). Take everything after the last numeric flag column.
         cm = re.search(r"([0-9][spdfghik][0-9a-z.\- ]*?)\s*$", rest)
         config = cm.group(1).strip() if cm else ""
-        out.append(dict(kind=base_kind, group=group, value=value, uncert=uncert,
-                        hf_ref=hf_ref, scale=scale, fixed=fixed, config=config,
-                        raw=ln.rstrip()))
+        out.append(dict(code=m.group(2), kind=base_kind, k=krank, group=group,
+                        value=value, uncert=uncert, hf_ref=hf_ref, scale=scale,
+                        fixed=fixed, config=config, raw=ln.rstrip()))
+    # INHERIT the config label from each code's EAV line to its Gk/Fk/ZETA lines.
+    # (A CI line's config is a "cfgA - cfgB" pair carried on the line itself, so it
+    # keeps its own label and is not overwritten.)
+    label_of_code = {p["code"]: p["config"] for p in out
+                     if p["kind"] == "EAV" and p["config"]}
+    for p in out:
+        if not p["config"] and p["kind"] in ("G", "F", "ZETA"):
+            p["config"] = label_of_code.get(p["code"], "")
     return out
 
 
@@ -78,7 +98,7 @@ def _selftest():
     ]
     # find the 3s3p EAV and the first free G1
     eav = [p for p in ps if p["kind"] == "EAV" and p["config"] == "3s3p"]
-    g1 = [p for p in ps if p["kind"] == "G1" and not p["fixed"]]
+    g1 = [p for p in ps if p["kind"] == "G" and p["k"] == 1 and not p["fixed"]]
     ok = True
     if eav and abs(eav[0]["value"] - 26194.7) < 0.1:
         print(f"PASS  3s3p EAV = {eav[0]['value']} (expected 26194.7)")

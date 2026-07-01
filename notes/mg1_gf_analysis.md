@@ -3,6 +3,36 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
+## ===== 2026-06-30 (v3d): FULL RCE REPRODUCTION RUN — PARTIAL, INCONCLUSIVE =====
+Built the full transcription and ran Bob's deck through OUR RCG. RESULT (tested):
+  our fit             3s.nd 1D-series RMS = 305  (3s3d 1D +520)  overall 86
+  Bob's deck -> our RCG            RMS = 214  (3s3d 1D +172)  overall 141
+  Bob's OWN fit                    RMS =  59  (3s3d 1D  +77)  overall ~18
+Bob's parameters, in our RCG, IMPROVE the 1D series (305->214, 3s3d +520->+172) but
+do NOT reproduce his 59. HONEST INTERPRETATION (do not overclaim): this is
+INCONCLUSIVE between (a) our RCG differs from his, and (b) the transcription is
+incomplete/inconsistent. Evidence for (b): only 72/107 in-basis free params mapped;
+CI left at ours; and 3p2 3P / 3s3p 3P got WORSE by ~550/280 under the partial deck
+(the deck is internally INCONSISTENT -- 3p2 EAV transcribed but its zeta/Slater
+partly ours -> fine structure thrown off). So we CANNOT yet blame the forward model.
+The 1D-relevant levels DID move toward Bob (3s3d 1D -348), so his params carry real
+1D-fixing info. NEXT to make it a CLEAN test: complete the transcription (map the
+remaining 35 in-basis params -- fix parser label truncation '3s9s'->'3s9', add the
+high-n ZETA + g/i configs, decide CI), so the deck is fully Bob-consistent; THEN the
+214-vs-59 gap cleanly isolates engine-vs-params.
+
+TOOLS BUILT + VALIDATED this pass:
+- tools/parse_bob_params.py: now inherits config labels from each config-CODE's EAV
+  line to its Gk/Fk/ZETA lines (Bob's 2nd column = config index; no need to decode
+  the occupation-vector header). Self-test passes; G1(13) series correctly labeled
+  3s4p..3s15p.
+- tools/transcribe_bob_deck.py: maps Bob's free params -> our ING11 slots, robust
+  zero-point (median Bob-ours EAV diff = +3136.5, std 230 after excluding the
+  basis-edge outliers 3s.9d/10d/11d/3p.4s whose OWN slot is unreliable), writes
+  ING11.bobdeck. KEY MEASURED FACTS: the EAV zero-point is a clean +3137 for nearly
+  every config (pure re-zero); 3p2's diff is +1970 i.e. ~1170 BELOW the zero-point
+  = REAL (Bob's perturber sits lower), KEPT.
+
 ## ===== 2026-06-30 (v3c): RCE-REPRODUCTION SCOPED — channel-only FALSIFIED =====
 Started the "full RCE reproduction" (transcribe Bob's fitted deck -> our RCG ->
 does it reproduce his 1D residuals?). De-risked incrementally; two tested findings:
