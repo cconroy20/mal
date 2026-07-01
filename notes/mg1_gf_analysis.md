@@ -3,6 +3,44 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
+## ===== 2026-06-30 (v3e): REPRODUCTION RESOLVED — HF/CONVENTION MISMATCH =====
+COMPLETED the transcription audit and found the DEFINITIVE reason Bob's deck won't
+reproduce in our RCG: **his Slater integrals are on a different HF/convention footing
+than our RCG expects, so his fitted values are NOT portable.** Smoking gun (tested):
+  3p2 1S-3P splitting: OBSERVED 10462 cm^-1.
+  - our fitted F2(3p2)=18633 -> split 10452  (NAILS observed) ✓
+  - Bob RECORDS F2(3p2)=13430 (freely fit, uncert 40) -> in OUR RCG split 7600 ✗
+  - ratio-transcribe (Bob fitted/his-HF x our-HF = 12223) -> split 6938 ✗ (worse)
+  The F2->split relation in our RCG is clean & linear; the F2 that yields the
+  observed split in OUR engine is ~18600. Bob's own RCE gets the observed split FROM
+  13430 -> our RCG and his RCE compute the 3p2 term structure on DIFFERENT
+  conventions (Slater normalization / HF potential). Confirmed systematic, not a
+  one-off: Bob's HF_ref vs our HF on the key low-n Slaters runs ~1.07-1.10x
+  (3s3p G1 1.069, 3p2 F2 1.099, 3s4p G1 1.107) -- a real ~10% HF difference, exactly
+  the "our HF differs from Bob's, only the PHYSICAL TARGET transfers, not the values"
+  caveat that was in the notes all along, now DEMONSTRATED at the integral level.
+
+=> THE ANSWER to "why is Bob's same-deck fit 5x better on 1D": it is NOT the same
+   deck in our engine. His parameters live in his RCE's convention; transcribed
+   absolute values give the WRONG term structure in our RCG (3p2 1S wrong by -3313
+   under his full deck). So the earlier v3d "214 vs his 59" was NOT a fair
+   his-params-vs-our-engine test -- it was his-params-in-the-WRONG-convention. The
+   transcription approach is a DEAD END for exact reproduction: you cannot port
+   absolute Cowan Slater integrals between two HF/convention footings.
+   WHAT WOULD WORK INSTEAD (future): (a) start from BOB'S HF (hf1200z.dat -> feed his
+   RGN/RCN output as our ab-initio ING11) so the footing matches, THEN transcribe his
+   fitted SCALES; or (b) just RE-FIT on our own footing but with Bob's FREE-SET choices
+   (which configs' EAV/G he frees) -- the transferable part is the recipe, not values.
+   The physics conclusion for the 1D gap is unchanged & now cleaner: it's the 3p2
+   perturber position, and matching Bob requires our-footing re-fit, not his values.
+
+TOOLS: parse_bob_params.py + transcribe_bob_deck.py both validated & correct (the
+transcription faithfully copies Bob's values; the values just aren't portable). The
+label parser is CLEAN (no truncation -- the earlier '3s9'/'3s' were _cfgkey choking
+on l-orbital 3s.Nl configs, all >60000/out-of-basis; 35 "unmapped" are all above the
+cap, doubly-excited 3p.Nd, high-L 3s.Nl, the ground reference, or negligible high-n
+zeta -- every sub-60000 physically-relevant param DID map).
+
 ## ===== 2026-06-30 (v3d): FULL RCE REPRODUCTION RUN — PARTIAL, INCONCLUSIVE =====
 Built the full transcription and ran Bob's deck through OUR RCG. RESULT (tested):
   our fit             3s.nd 1D-series RMS = 305  (3s3d 1D +520)  overall 86
