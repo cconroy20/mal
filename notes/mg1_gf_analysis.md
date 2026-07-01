@@ -3,6 +3,32 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
+## ===== 2026-07-01 (v3g): ADOPTED BOB'S HF FLAGS (irel=1, corrf=0.5) — gf WIN =====
+Set irel=1 AND corrf=0.5 in gen_in36 to match Bob's hf1200z RCN card, regenerated the
+full ab-initio chain + scaled seed, re-ran the staged fit. NOW CANONICAL. Result
+(Charlie's call: "run it, the flags might help the fitter" -- and they did, on gf):
+                    overall-RMS  median  1D-RMS   A/B-gfRMS
+  irel0 (old)           85        3.3     305      0.274
+  irel1+corrf0.5 (NEW)  91        3.0     305      0.168   <- BIG gf win, near Bob 0.13
+  Bob                   18        0.0      59      ~0.13
+HONEST READ: the 1D SERIES (the target of the whole hunt) did NOT improve (305->305;
+3s3d 1D actually +520->+606, others better, net wash) -- so this is NOT the 1D fix.
+BUT gfRMS dropped 0.274->0.168 (39%!), now close to Bob. The corrf=0.5 footing gives
+eigenvectors with much better TRANSITION RATES (the project's core deliverable), at a
+tiny energy-RMS cost (85->91, median even better). Adopted because gf is the point.
+KEY LESSON (Charlie was right, I was wrong): I argued to SKIP corrf=0.5 because the
+ab-initio integrals net-moved AWAY from Bob (7 closer, 15 farther). But "ab-initio
+closer to Bob" does NOT predict "fit better" -- the FIT found a gf win the integral
+comparison couldn't see. RUN THE FIT, don't reason from the ab-initio deltas.
+3s3d G2 moved 3192->2520 (Bob 2651) under the new flags -- corrf=0.5 does pull the
+key d-integral toward Bob, consistent with v3f (the diff lives in the d-orbitals).
+
+TOOLING BUG FIXED (would have broken ALL future relativistic ions, e.g. Fe II):
+ing11_params._is_singleconf required the marker 'hf' in cols[68:80], but RCN writes
+'hr' for irel!=0 -> every irel=1 ING11 line was silently rejected, _raw_slots/
+param_labels/scale_hf all returned 0 params. Now accepts 'hf' OR 'hr'. irel=0
+regression-checked (5699 params unchanged).
+
 ## ===== 2026-07-01 (v3f): WHY our HF differs from Bob's — PROBED =====
 Followed up "why are the ab-initio HF integrals different". Two candidates RULED OUT
 by DIRECT re-run test (rebuilt RCN with the flag flipped, diffed the whole ING11):
