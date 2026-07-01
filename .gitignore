@@ -44,3 +44,7 @@ work/mg1_full/
 # Scratch RCG run dirs (regenerable binary decks: FOR07x/ING11/OUTG11/...)
 work/mg1_cond/
 work/mg1_probe/
+work/mg1_irel/
+work/mg1_corrf/
+# Parallel-Jacobian worker dirs (transient; auto-created/removed per fit run)
+work/mg1_full_w*/

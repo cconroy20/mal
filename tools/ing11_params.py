@@ -25,8 +25,17 @@ SCALE_P = 1e4
 SCALE_CI = 1e4
 
 
+# The single-config / CI marker in cols [68:80] is 'hf' for non-relativistic RCN
+# (irel=0) and 'hr' for relativistic (irel=1) -- accept BOTH. (Without 'hr' every
+# irel=1 ING11 line was silently rejected, so _raw_slots/param_labels/scale_hf all
+# returned 0 params on a relativistic deck.)
+def _hf_marker(line):
+    seg = line[68:80]
+    return "hf" in seg or "hr" in seg
+
+
 def _is_singleconf(line):
-    if len(line) < 70 or "hf" not in line[68:80]:
+    if len(line) < 70 or not _hf_marker(line):
         return False
     if not re.match(r"\d", line[19:20]):
         return False
@@ -36,7 +45,7 @@ def _is_singleconf(line):
 
 
 def _is_ci(line):
-    return " - " in line[0:18] and "hf" in line[68:80]
+    return " - " in line[0:18] and _hf_marker(line)
 
 
 def values_by_key(path):

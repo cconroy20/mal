@@ -23,8 +23,12 @@ Usage:
 import argparse
 import re
 
+# irel=1 (relativistic corrections; negligible for Mg but the correct default) and
+# corrf=0.50 (half correlation-potential coefficient) -- set to MATCH BOB KURUCZ's
+# hf1200z RCN card (2026-07-01), to test whether his ab-initio HF footing lets the
+# fitter do better. irel char at col 45 ('-2 001' vs '-2 000'); corrf at cols 65-70.
 HEADER = ("200-90 0 2  01.  4.0    5.E-08    1.E-11"
-          "-2 00090 0 1.0  0.65  0.0 1.00   -6")
+          "-2 00190 0 1.0  0.65  0.0 0.50   -6")
 CORE = "2p6"
 
 # Bob Kurucz's Mg I configuration set (b1200e.com + b1200o.com), even then odd.
