@@ -99,19 +99,25 @@ def parse_compositions(path):
             continue
         Jval = "%g" % float(m.group(1))
         # --- eigenvalues: numeric lines until the eigenvector/other section ---
+        # RCG prints the eigenvalues 11-per-line with a BLANK LINE between each row
+        # (see OUTG11: "EIGENVALUES (J=..)" then rows of 11 floats separated by
+        # blanks, ended by "CONFIG. NO."). The block therefore must NOT terminate on
+        # a blank line -- doing so stopped after the FIRST 11 values and silently
+        # dropped the rest of the J-block (for J=2 that was 11 of 113 levels kept,
+        # losing every high-lying doubly-excited level: 3p3d, 3d.nl, ...). Only the
+        # explicit section headers (or the next EIGENVALUES block) end it.
         evs = []
         j = i + 1
         while j < n and not lines[j].strip():
             j += 1
         while j < n:
             s = lines[j]
-            if any(t in s for t in ("CONFIG. NO.", "EIGENVECTORS", "G-VALUES")):
+            if any(t in s for t in ("CONFIG. NO.", "EIGENVECTORS", "G-VALUES")) \
+                    or re.search(r"EIGENVALUES\s*\(J=", s):
                 break
             nums = _NUM.findall(s)
             if nums:
                 evs.extend(float(x) for x in nums)
-            elif s.strip() == "" and evs:
-                break
             j += 1
         # --- locate the LS eigenvector block ---
         while j < n and not ("EIGENVECTORS" in lines[j] and "LS" in lines[j]):

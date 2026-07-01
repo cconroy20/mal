@@ -40,3 +40,7 @@ kurucz_ref/
 # Full-basis Mg I run outputs (regenerate with work/run_mg1_full.sh; in36 via
 # tools/gen_in36.py)
 work/mg1_full/
+
+# Scratch RCG run dirs (regenerable binary decks: FOR07x/ING11/OUTG11/...)
+work/mg1_cond/
+work/mg1_probe/

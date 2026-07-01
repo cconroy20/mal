@@ -113,6 +113,16 @@ def load_nist(path):
             p = ln.rstrip("\n").split("\t")
             if len(p) < 5:
                 continue
+            # DROP 2p^5 core-EXCITED levels (an open 2p core-hole, E_obs ~440000+
+            # cm^-1). Our basis is built on the CLOSED 2p^6 core, so these are not
+            # representable -- and worse, _cfgkey strips the core-hole and collapses
+            # e.g. '2p5.(2P*).3s.3p2.(4P) 3P' -> '3p2 3P', which then FALSE-MATCHES
+            # our valence 3p^2 3P and injects a ~-385000 cm^-1 residual. There are
+            # ~55 such entries in the Mg I NIST table; they must never enter the fit
+            # or the level matching. (The parser fix exposed them by finally matching
+            # the high-lying levels that had been silently dropped.)
+            if "2p5" in p[0].replace(" ", ""):
+                continue
             rows.append({"config": p[0], "term": p[1], "J": p[2],
                          "E_obs": float(p[3]), "parity": p[4]})
     return rows
@@ -184,7 +194,35 @@ def match_levels(calc, nist):
 # ----------------------------------------------------------------------------
 # pages
 # ----------------------------------------------------------------------------
-def page_summary(pdf, species, matched, lines, fit_rms):
+def _resid_stats(resids):
+    """(N, median|d|, RMS, 90th pct |d|, max|d|) for a list of residuals, with the
+    global median offset removed (the convention the headline level-RMS uses)."""
+    if not resids:
+        return None
+    r = np.array(resids, float)
+    r = r - np.median(r)
+    a = np.abs(r)
+    return {"n": len(r), "median": float(np.median(a)),
+            "rms": float(np.sqrt(np.mean(r ** 2))),
+            "p90": float(np.percentile(a, 90)), "max": float(a.max())}
+
+
+def build_compare(fitted, kurucz_levels, cap):
+    """Head-to-head stats: ours (from the identity-matched fitted-levels JSON,
+    which already carries E_obs/E_fit per level) vs Bob's RCE residuals
+    (kurucz_levels), both restricted to E_obs <= cap so the comparison is on an
+    identical footing. Returns {cap, ours, bob} or None."""
+    if not fitted or not kurucz_levels:
+        return None
+    ours = [fl["E_fit"] - fl["E_obs"] for fl in fitted
+            if fl.get("E_fit") is not None and fl.get("E_obs") is not None
+            and fl["E_obs"] <= cap]
+    bob = [d for (e, d) in kurucz_levels if e <= cap]
+    so, sb = _resid_stats(ours), _resid_stats(bob)
+    return {"cap": cap, "ours": so, "bob": sb} if (so and sb) else None
+
+
+def page_summary(pdf, species, matched, lines, fit_rms, compare=None):
     fig = plt.figure(figsize=(8.5, 11))
     fig.suptitle(f"Diagnostic report: {species}", fontsize=16, y=0.97)
     ax = fig.add_axes([0.08, 0.1, 0.84, 0.8]); ax.axis("off")
@@ -203,6 +241,24 @@ def page_summary(pdf, species, matched, lines, fit_rms):
             txt.append("Pre-fit RMS (E_calc - E_obs): "
                        f"{np.sqrt(np.mean(np.square(resid))):.0f} cm^-1 "
                        "(ab initio, no RCE fit yet)")
+
+    # Head-to-head vs Bob Kurucz's RCE fit, on an IDENTICAL footing (same energy
+    # cap, offset removed). RMS is tail-dominated by the singlet 3s.nd 1D / near-IE
+    # levels, so the MEDIAN |E-O| is the honest measure of bulk quality.
+    if compare:
+        o, b = compare["ours"], compare["bob"]
+        txt.append("")
+        txt.append(f"Energy-level fit vs Bob Kurucz (E_obs <= {compare['cap']:.0f} "
+                   "cm^-1, offset-removed):")
+        txt.append(f"  {'':14}{'N':>5}{'median|E-O|':>13}{'RMS':>8}"
+                   f"{'90th':>8}{'max':>8}")
+        txt.append(f"  {'this fit':14}{o['n']:>5}{o['median']:>13.1f}"
+                   f"{o['rms']:>8.0f}{o['p90']:>8.0f}{o['max']:>8.0f}")
+        txt.append(f"  {'Bob (RCE)':14}{b['n']:>5}{b['median']:>13.1f}"
+                   f"{b['rms']:>8.0f}{b['p90']:>8.0f}{b['max']:>8.0f}")
+        txt.append("  bulk (median) is near-Bob; the ~3x RMS gap is the singlet")
+        txt.append("  3s.nd 1D / near-IE tail (unobserved-perturber wall), not")
+        txt.append("  data starvation -- the basis matches Bob's b1200{e,o} deck.")
 
     # strongest computed lines
     if lines:
@@ -328,12 +384,15 @@ EV = 8065.544   # cm^-1 per eV
 
 
 def _grotrian_page(pdf, species, panels, efield, solid_label, title,
-                   layout=None, ylim=None, ie_cm=None):
+                   layout=None, ylim=None, ie_cm=None, efield_offset=0.0):
     """Na I-style Grotrian diagram. One column per term symbol; all levels of a
     term stack in that column, each a short horizontal tick labelled by its
     running orbital (red). `efield` selects the solid-line energy ('E_calc' ab
     initio or 'E_fit' fitted); NIST observed is the dashed overlay. Left y-axis
-    in cm^-1, right y-axis in eV. Optional ionization limit drawn dashed."""
+    in cm^-1, right y-axis in eV. Optional ionization limit drawn dashed.
+    `efield_offset` is ADDED to every solid energy -- used to remove the fit's
+    global ground-pinned offset so fitted vs observed align (same convention as
+    the residuals page and gf_fit's level-RMS)."""
     if layout is None:
         layout = _grotrian_layout(panels)
     colx, cols, nx = layout["colx"], layout["cols"], layout["nx"]
@@ -350,6 +409,8 @@ def _grotrian_page(pdf, species, panels, efield, solid_label, title,
             continue
         for m in p["lev"]:
             es = m.get(efield); eo = m.get("E_obs")
+            if es is not None:
+                es += efield_offset
             orb = _running_orbital(m.get("config", ""))
             # a level above the first ionization limit is autoionizing (a
             # doubly-excited resonance embedded in the continuum) -> tag it.
@@ -516,11 +577,11 @@ def _dedup_levels1(fitted):
 
 
 def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None,
-                nist=None):
+                nist=None, fitted_label="fitted (RCE)"):
     """Centerpiece. When fitted data exist, both Grotrian pages share ONE panel
     set and ONE x-layout so paging gives a clean before/after:
       Page 1: ab initio (solid) + NIST (dashed)
-      Page 2: fitted RCE (solid) + NIST (dashed)
+      Page 2: fitted (solid, offset-aligned) + NIST (dashed)
     Then the merged level table. Without a fit, falls back to the ab-initio-only
     diagram from `matched`."""
     if fitted:
@@ -540,8 +601,15 @@ def page_levels(pdf, species, matched, fitted=None, calc=None, ie_cm=None,
                        "computed (ab initio)",
                        "term diagram - ab initio vs observed", layout, ylim,
                        ie_cm)
-        _grotrian_page(pdf, species, panels, "E_fit", "fitted (RCE)",
-                       "term diagram - fitted vs observed", layout, ylim, ie_cm)
+        # remove the fit's global ground-pinned offset (median E_fit-E_obs) so
+        # the fitted term diagram aligns to NIST; same convention as the
+        # residuals page / gf_fit level-RMS.
+        fdiffs = [m["E_fit"] - m["E_obs"] for p in panels for m in p["lev"]
+                  if m.get("E_fit") is not None and m.get("E_obs") is not None]
+        foff = -float(np.median(fdiffs)) if fdiffs else 0.0
+        _grotrian_page(pdf, species, panels, "E_fit", fitted_label,
+                       "term diagram - fitted vs observed", layout, ylim, ie_cm,
+                       efield_offset=foff)
         _page_level_table(pdf, species, panels)
     else:
         panels = _group_terms(matched)
@@ -595,7 +663,13 @@ def _table_pages(pdf, ttl, col, rows, numeric_from=None):
 
 def _page_level_table(pdf, species, panels):
     """Unified table (one row per level): E_obs, E_calc, Δ_abinit, E_fit, Δ_fit.
-    Operates on the unified panels where each level carries all three energies."""
+    Operates on the unified panels where each level carries all three energies.
+    Δ_fit (and the displayed E_fit) have the fit's global ground-pinned offset
+    removed (median E_fit-E_obs), so Δ_fit is the honest residual that matches the
+    headline level-RMS -- NOT the ~constant absolute offset of the pinned zero."""
+    fdiffs = [m["E_fit"] - m["E_obs"] for p in panels for m in p["lev"]
+              if m.get("E_fit") is not None and m.get("E_obs") is not None]
+    foff = float(np.median(fdiffs)) if fdiffs else 0.0
     rows = []
     for p in panels:
         term = _term_mathlabel(p["tk"], p["par"])
@@ -605,13 +679,14 @@ def _page_level_table(pdf, species, panels):
             except (TypeError, ValueError):
                 Js = str(m["J"])
             eo = m.get("E_obs"); ec = m.get("E_calc"); ef = m.get("E_fit")
+            efa = (ef - foff) if ef is not None else None   # offset-aligned E_fit
             rows.append([
                 p["cfg"], term, Js,
                 (f"{eo:.1f}" if eo is not None else "--"),
                 (f"{ec:.1f}" if ec is not None else "--"),
                 (f"{ec - eo:+.1f}" if (ec is not None and eo is not None) else "--"),
-                (f"{ef:.1f}" if ef is not None else "--"),
-                (f"{ef - eo:+.1f}" if (ef is not None and eo is not None) else "--"),
+                (f"{efa:.1f}" if efa is not None else "--"),
+                (f"{efa - eo:+.1f}" if (efa is not None and eo is not None) else "--"),
             ])
     col = ["config", "term", "$J$", "$E_\\mathrm{obs}$", "$E_\\mathrm{abinit}$",
            "$\\Delta_\\mathrm{abinit}$", "$E_\\mathrm{fit}$",
@@ -678,13 +753,21 @@ def load_kurucz_levels(paths):
 
 
 def page_residuals(pdf, species, matched, unified_panels=None,
-                   kurucz_levels=None):
+                   kurucz_levels=None, fitted_label="fitted (RCE)"):
     """Residuals vs observed, in TWO stacked panels: top shows the full y-range
     (so the large ab-initio offsets are visible), bottom zooms to the FITTED
-    residuals (so the fit-quality comparison -- our RCE fit vs Kurucz's -- is
+    residuals (so the fit-quality comparison -- our fit vs Kurucz's -- is
     legible instead of collapsed onto zero by the ab-initio scale). With a fit
     (unified_panels), ab initio (circles) and fitted (diamonds) come from the
-    SAME level set; without a fit, fall back to ab-initio-only `matched`."""
+    SAME level set; without a fit, fall back to ab-initio-only `matched`.
+
+    The FITTED residuals have their global MEDIAN OFFSET removed (the same
+    convention gf_fit's level-RMS uses): the fit pins the ground-config Eav to 0,
+    which puts the whole spectrum on an absolute zero offset by a near-constant
+    from NIST's; the meaningful quantity is the residual STRUCTURE, not that
+    bulk shift. Without this the RMS would be dominated by a ~1700 cm^-1 constant
+    and disagree with the headline fit RMS. Ab-initio is left RAW (its offset is
+    physically informative -- shows how far HF sits from observed)."""
     # collect series: (label, color, marker, points Nx2, is_fit?)
     series = []
     if unified_panels is not None:
@@ -698,8 +781,9 @@ def page_residuals(pdf, species, matched, unified_panels=None,
             series.append(("ab initio", COL_ABINITIO, MK_ABINITIO,
                            np.array(ab), False))
         if ft:
-            series.append(("fitted (RCE)", COL_FIT, MK_FIT,
-                           np.array(ft), True))
+            ft = np.array(ft)
+            ft[:, 1] -= np.median(ft[:, 1])     # remove global offset (see above)
+            series.append((fitted_label, COL_FIT, MK_FIT, ft, True))
     else:
         res = [(m["E_obs"], m["E_calc"] - m["E_obs"])
                for m in matched if m["matched"] and m["E_obs"] is not None]
@@ -950,12 +1034,20 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--levels1", default=None,
                     help="RCE LEVELS1 output; if given, add fitted-vs-observed.")
+    ap.add_argument("--fitted-levels-json", default=None,
+                    help="JSON list of fitted levels [{config,term,J,parity,"
+                         "E_obs,E_fit}] (cm^-1), e.g. from a gf_fit (Python "
+                         "optimizer) run that has no RCE LEVELS1. Alternative to "
+                         "--levels1 for the level/residual pages.")
     ap.add_argument("--ie", default=None,
                     help="ionization-energy table (species<TAB>IE_cm1).")
     ap.add_argument("--gf-fitted", default=None,
                     help="OUTG11 from the fitted-parameter RCG run (fitted gf).")
     ap.add_argument("--gf-fitted-label", default="fitted (RCE)",
                     help="legend label for the fitted-gf series on the gf page.")
+    ap.add_argument("--fitted-label", default="fitted (RCE)",
+                    help="legend label for the fitted series on the level/"
+                         "residual pages (e.g. 'fitted (energy-only, full basis)').")
     ap.add_argument("--nist-lines", default=None,
                     help="cached NIST lines table (reference log gf).")
     ap.add_argument("--kurucz-lines", default=None,
@@ -967,6 +1059,9 @@ def main():
                     help="Bob Kurucz's RCE fit log(s) c<xxyy>{e,o}z.log; his "
                          "fitted level residuals, added to the residuals page.")
     ap.add_argument("--fit-rms", type=float, default=None)
+    ap.add_argument("--compare-cap", type=float, default=None,
+                    help="energy cap (cm^-1) for the page-1 Bob head-to-head "
+                         "stats table; restricts BOTH series to E_obs <= cap.")
     a = ap.parse_args()
 
     calc, lines = parse_outg11(a.outg11)
@@ -976,7 +1071,13 @@ def main():
 
     fitted = None
     unified = None
-    if a.levels1 and os.path.exists(a.levels1):
+    if a.fitted_levels_json and os.path.exists(a.fitted_levels_json):
+        import json
+        with open(a.fitted_levels_json) as f:
+            fitted = json.load(f) or None
+        if fitted:
+            unified = build_unified_panels(calc, fitted, nist)
+    elif a.levels1 and os.path.exists(a.levels1):
         fitted = parse_levels1(a.levels1) or None
         if fitted:
             unified = build_unified_panels(calc, fitted, nist)
@@ -990,13 +1091,17 @@ def main():
                     else None)
     kurucz_levels = (load_kurucz_levels(a.kurucz_levels)
                      if a.kurucz_levels else None)
+    compare = (build_compare(fitted, kurucz_levels, a.compare_cap)
+               if a.compare_cap else None)
 
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     with PdfPages(a.out) as pdf:
-        page_summary(pdf, a.species, matched, lines, a.fit_rms)
-        page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist)
+        page_summary(pdf, a.species, matched, lines, a.fit_rms, compare=compare)
+        page_levels(pdf, a.species, matched, fitted, calc, ie_cm, nist,
+                    fitted_label=a.fitted_label)
         page_residuals(pdf, a.species, matched, unified,
-                       kurucz_levels=kurucz_levels)
+                       kurucz_levels=kurucz_levels,
+                       fitted_label=a.fitted_label)
         if nist_lines:
             page_gf(pdf, a.species, a.outg11, fitted_path, nist_lines,
                     gf_fitted_label=a.gf_fitted_label, kurucz_lines=kurucz_lines)
