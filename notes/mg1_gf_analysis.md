@@ -3,6 +3,39 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
+## ===== 2026-06-30 (v3c): RCE-REPRODUCTION SCOPED — channel-only FALSIFIED =====
+Started the "full RCE reproduction" (transcribe Bob's fitted deck -> our RCG ->
+does it reproduce his 1D residuals?). De-risked incrementally; two tested findings:
+
+1. CHANNEL-ONLY TRANSCRIPTION FAILS (decisive). Dropping Bob's fitted 1D-channel
+   EAVs (3s3d 48244.7, 3s4d 54310.5, 3s5d 57008.2, 3p2 59468.5) into our fitted
+   deck does NOT reproduce his good 1D residuals at ANY zero-point (tested Z=1,2,
+   3.15 kK). At Z=3.15 the 1D barely moves and 3p2 3P/1S blow up to -1200; other Z
+   are far worse. => the 1D fix is a WHOLE-DECK effect, NOT localized to 1D-channel
+   params. A partial transcription can't answer the question; need the full deck.
+   (Also measured: Bob's 3s.nd EAVs are ~+3150 vs ours [mostly zero-point], but 3p2
+   only +1970 -> RELATIVE to 3s.nd Bob's perturber sits ~1180 LOWER. Direction helps
+   1D, but moving it alone breaks 3p2 3P/1S -- the same tension.)
+
+2. HF FOOTING OK: Bob's HF references == ours to ~500 cm^-1 (3s3d 45170 vs 44510,
+   3p2 55240 vs 55570), so his fitted values ARE transcribable after removing a
+   common zero-point. Good -- reproduction is meaningful.
+
+TOOL BUILT + VALIDATED: tools/parse_bob_params.py parses Bob's fitted radial params
+from c1200{e,o}z.log (value/uncert/hf_ref/scale/fixed/config). Self-test PASSES on
+known values (3s3p EAV 26194.7, G1(12) 23423.5). Free params: ~133 total (115 EAV,
+16 G1, 1 F2 curated exchange, +13 ZETA).
+
+THE REMAINING HARD PART (deferred -- do NOT rush, it's where errors hide): the
+GROUP->CONFIG MAPPER. Bob's G1/F2/ZETA params carry NO config label -- only his
+internal hex-coded config index (NPAR header: 's 1 p 0 p 1 f 0...' occupation
+vectors, indices 1-9,A-P). Mapping his config order to ours needs reconstructing
+his config list from those occupation vectors. EAVs DO have labels: ~57 of 115 map
+to our configs (the other ~58 are n>=12 configs NOT in our basis -- skip them; a
+few are label-format nits like '3s2'/'3s12s'->'3s.12s'). NEXT SESSION: build the
+group->config mapper, VERIFY it reproduces a few known Bob levels (3s3p, 3p2)
+before trusting the full deck, then write the Bob-deck ING11 and run our RCG.
+
 ## ===== 2026-06-30 (v3b): THE 3s.nd 1D GAP — PROBED, MECHANISM FOUND, NOT YET CURED =====
 Goal for this pass: "do at least as well as Bob." Localized WHERE the gap is and
 tested (forward-model probes, isolated RCG run dir) every easy explanation. Many of
