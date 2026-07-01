@@ -3,6 +3,32 @@
 **Date:** 2026-06-28
 **Goal:** improve the Mg I fitted log gf (vs NIST) from the warm-up RCE loop.
 
+## ===== 2026-07-01 (v3f): WHY our HF differs from Bob's — PROBED =====
+Followed up "why are the ab-initio HF integrals different". Two candidates RULED OUT
+by DIRECT re-run test (rebuilt RCN with the flag flipped, diffed the whole ING11):
+  - RELATIVITY (irel): re-ran RCN with irel=1 (Bob's card shows irel=1, ours=0). Max
+    change ANYWHERE in the ING11 = 0.6 cm^-1. Mg is light (Z=12) -> relativity is
+    negligible. NOT the cause. (Our RCN log confirms we run irel=0.)
+  - CORRELATION FACTOR (corrf): re-ran with corrf 1.00->0.50. Max change 10 cm^-1.
+    NOT the cause.
+(Both are ~1000x too small to explain the ~2000 cm^-1 / ~10% differences vs Bob.)
+
+ESTABLISHED PATTERN (the real clue), Bob_HF/our_HF ratio:
+  - 3s.np G1 exchange: ~CONSTANT 1.07-1.11 across n=3..9 (a uniform ~8% offset).
+  - 3s.nd G2 exchange: GROWS with n -- 0.83(3d) 1.27(4d) 1.44(5d) 1.51(6d) 1.55(8d).
+An n-DIVERGING ratio is NOT a scale factor -- it means the RADIAL WAVEFUNCTIONS
+differ, worst for the diffuse high-n d-orbitals (and 3s3d, the real 3d, is the lone
+ratio<1). 
+LEADING HYPOTHESIS (NOT yet proven): our rcn36 vs Bob's rcn32c compute the d-orbital
+radial functions differently -- most likely a correlation/polarization potential his
+version applies (rcn32c is an older CRAY build; Cowan's correlation potential most
+affects penetrating d-orbitals). To confirm: compare the two RCN versions' potential
+terms, or compare raw d-orbital P(r) between the codes. NB the practical upshot for
+the fit is UNCHANGED: absolute Cowan integrals are NOT portable across the two HF
+footings (v3e), so match Bob via the RECIPE (free-set) re-fit on our footing, or by
+starting from his HF (hf1200z.dat). This v3f just identifies WHERE the footing diff
+lives (d-orbital radial functions), not a bug to fix.
+
 ## ===== 2026-06-30 (v3e): REPRODUCTION RESOLVED — HF/CONVENTION MISMATCH =====
 COMPLETED the transcription audit and found the DEFINITIVE reason Bob's deck won't
 reproduce in our RCG: **his Slater integrals are on a different HF/convention footing
